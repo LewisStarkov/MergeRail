@@ -1,0 +1,40 @@
+[project]
+name = "agentq"
+version = "0.1.0"
+description = "Write the task down; an agent does it, a reviewer checks it, and it lands as a merge or a PR."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["claude", "agent", "code-review", "automation", "telegram"]
+# Deliberately empty. This thing gets installed into other people's projects
+# with `uvx`, and a dependency of ours is a version conflict of theirs.
+dependencies = []
+
+[project.scripts]
+agentq = "agentq.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentq"]
+
+[dependency-groups]
+dev = ["mypy>=1.11", "pytest>=8", "ruff>=0.6"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
