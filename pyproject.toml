@@ -1,11 +1,22 @@
 [project]
 name = "agentq"
 version = "0.1.0"
-description = "Write the task down; an agent does it, a reviewer checks it, and it lands as a merge or a PR."
+description = "Queue coding tasks across agent CLIs, review the result, and deliver it safely."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-keywords = ["claude", "agent", "code-review", "automation", "telegram"]
+keywords = ["agent", "claude", "codex", "opencode", "code-review", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
 # Deliberately empty. This thing gets installed into other people's projects
 # with `uvx`, and a dependency of ours is a version conflict of theirs.
 dependencies = []
@@ -21,7 +32,7 @@ build-backend = "hatchling.build"
 packages = ["src/agentq"]
 
 [dependency-groups]
-dev = ["mypy>=1.11", "pytest>=8", "ruff>=0.6"]
+dev = ["mypy>=1.11", "pytest>=8", "pytest-cov>=6", "ruff>=0.6"]
 
 [tool.ruff]
 line-length = 100
@@ -37,4 +48,14 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --cov=agentq"
+
+[tool.coverage.run]
+branch = true
+source = ["agentq"]
+
+[tool.coverage.report]
+fail_under = 80
+precision = 2
+show_missing = true
+skip_covered = true

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import log
-from ..tasks import Status, Task, TaskStore
+from ..tasks import Status, Task, TaskStore, write_atomic
 from .base import Front
 
 API = "https://api.telegram.org"
@@ -47,7 +47,8 @@ HELP = (
     "Send me anything — that is a task. A screenshot works too.\n\n"
     "/list — the queue\n"
     "/show &lt;id&gt; — one task in full\n"
-    "/retry &lt;id&gt; — put a failed one back\n"
+    "/retry_task &lt;id&gt; — run the agents again\n"
+    "/retry_delivery &lt;id&gt; — retry only merge or PR\n"
     "/done &lt;id&gt; — close it by hand\n"
     "/drop &lt;id&gt; — delete it"
 )
@@ -199,7 +200,15 @@ class TelegramFront(Front):
         if verb in ("list", "tasks", "queue"):
             self.send(chat_id, self._render_list())
             return True
-        if verb in ("show", "done", "close", "drop", "retry") and argument.isdigit():
+        if verb in (
+            "show",
+            "done",
+            "close",
+            "drop",
+            "retry",
+            "retry_task",
+            "retry_delivery",
+        ) and argument.isdigit():
             self._act(chat_id, verb, int(argument))
             return True
         # ``/todo fix the header`` — the verb is noise, the rest is the task.
@@ -220,11 +229,23 @@ class TelegramFront(Front):
             self.store.remove(task_id)
             self.send(chat_id, f"🗑 #{task_id} deleted.")
             return
-        if verb == "retry":
-            # Straight back into the queue. ``attempts`` is deliberately kept:
-            # "this one has been tried three times" belongs on the card.
-            self.store.update(task_id, status=Status.NEW, note="")
-            self.send(chat_id, f"🕓 #{task_id} back in the queue.")
+        if verb in ("retry", "retry_task"):
+            retried = self.store.retry_task(task_id)
+            text = (
+                f"🕓 #{task_id} back in the queue; previous branches were preserved."
+                if retried is not None
+                else f"Task #{task_id} cannot be retried."
+            )
+            self.send(chat_id, text)
+            return
+        if verb == "retry_delivery":
+            retried = self.store.retry_delivery(task_id)
+            text = (
+                f"🟢 #{task_id} delivery queued for {retried.approved_sha}."
+                if retried is not None
+                else f"Task #{task_id} has no recoverable approved delivery."
+            )
+            self.send(chat_id, text)
             return
         self.store.update(task_id, status=Status.CLOSED)
         self.send(chat_id, f"🗄 #{task_id} closed.")
@@ -303,6 +324,8 @@ class TelegramFront(Front):
             body += f"\n\n{task.url}"
         if task.branch and event in ("failed", "blocked"):
             body += f"\n\n<code>{escape(task.branch)}</code>"
+        if task.cost_usd and event in ("done", "failed", "blocked"):
+            body += f"\n💸 ${task.cost_usd:.2f}"
         for chat_id in self._recipients(task):
             self.send(chat_id, body)
 
@@ -340,6 +363,8 @@ class TelegramFront(Front):
             lines.append(f"🌿 <code>{escape(task.branch)}</code>")
         if task.attempts:
             lines.append(f"attempts: {task.attempts}")
+        if task.cost_usd:
+            lines.append(f"💸 ${task.cost_usd:.2f}")
         if task.url:
             lines.append(task.url)
         if task.note:
@@ -361,9 +386,8 @@ class TelegramFront(Front):
             self.admins = {int(item) for item in stored if isinstance(item, int | str)}
 
     def _save_state(self) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"offset": self.offset, "admins": sorted(self.admins)}
-        self.state_path.write_text(json.dumps(payload), encoding="utf-8")
+        write_atomic(self.state_path, json.dumps(payload))
 
 
 __all__ = ["API", "HELP", "MAX_FILE_BYTES", "MAX_ROWS", "POLL_TIMEOUT", "TelegramFront"]

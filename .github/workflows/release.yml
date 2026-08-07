@@ -1,0 +1,31 @@
+# Publishes to PyPI on a version tag, via trusted publishing — configure the
+# publisher once at https://pypi.org/manage/account/publishing/ (no token in
+# secrets), then: git tag v0.1.0 && git push --tags
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy .
+      - run: uv run pytest
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          package_version="$(uv run python -c 'import importlib.metadata; print(importlib.metadata.version("agentq"))')"
+          test "${GITHUB_REF_NAME}" = "v${package_version}"
+      - run: uv build
+      - run: uv run --with twine twine check dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1
