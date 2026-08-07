@@ -6,24 +6,20 @@ one step, and the last few error lines from that process are available to hand
 to the agent as context — nine times out of ten the task *is* the exception the
 service has been logging for the last five minutes.
 
-``uv run python -m app`` is two processes: the wrapper and the interpreter it
-execs. Terminating the wrapper leaves the real one running, and the restart
-would then bring up a second copy. So the child gets its own process group and
-the signal goes to the group.
+The child is started as the root of its own process tree and stopped as a
+tree — see :mod:`agentq.procs` for why, and for how that works per platform.
 """
 
 from __future__ import annotations
 
-import contextlib
 import os
 import re
-import signal
 import subprocess
 import threading
 from collections import deque
 from pathlib import Path
 
-from . import log
+from . import log, procs
 
 #: Output lines worth keeping for an agent to read.
 ERROR_LINE = re.compile(r"\b(ERROR|CRITICAL|Traceback|Exception|FATAL)\b")
@@ -51,15 +47,12 @@ class Supervisor:
         if not self.enabled or self.alive:
             return
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        self.process = subprocess.Popen(
+        self.process = procs.spawn(
             self.command,
             cwd=self.cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
-            start_new_session=True,
         )
         threading.Thread(target=self._drain, args=(self.process,), daemon=True).start()
         log.info("process.started", pid=self.process.pid, log=self.log_path)
@@ -82,16 +75,12 @@ class Supervisor:
         process, self.process = self.process, None
         if process is None or process.poll() is not None:
             return
-        try:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):  # pragma: no cover - race with exit
-            process.terminate()
+        procs.terminate_tree(process)
         try:
             process.wait(timeout)
         except subprocess.TimeoutExpired:
             log.warn("process.kill")
-            with contextlib.suppress(OSError):
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            procs.kill_tree(process)
             process.wait(5)
         log.info("process.stopped")
 

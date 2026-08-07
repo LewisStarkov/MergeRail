@@ -13,9 +13,12 @@ paying tokens for your missing toolchain.
 from __future__ import annotations
 
 import json
+import re
 import shutil
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,19 +45,61 @@ def _python_prefix(root: Path) -> list[str]:
     return []
 
 
+def _requirement_name(spec: str) -> str:
+    """``mypy>=1.11; python_version > '3.10'`` → ``mypy``."""
+    return re.split(r"[\[\]<>=!~;@\s]", spec.strip(), maxsplit=1)[0].lower()
+
+
+def _python_dependency_names(data: dict[str, Any]) -> set[str]:
+    """Every distribution named anywhere pyproject declares dependencies."""
+    listed: list[Any] = []
+    project = data.get("project")
+    if isinstance(project, dict):
+        direct = project.get("dependencies")
+        if isinstance(direct, list):
+            listed += direct
+        extras = project.get("optional-dependencies")
+        if isinstance(extras, dict):
+            for group in extras.values():
+                if isinstance(group, list):
+                    listed += group
+    groups = data.get("dependency-groups")
+    if isinstance(groups, dict):
+        for group in groups.values():
+            if isinstance(group, list):
+                listed += group
+    return {_requirement_name(str(item)) for item in listed if isinstance(item, str)}
+
+
 def _python_checks(root: Path) -> list[Check]:
-    manifest = _text(root / "pyproject.toml")
+    """The tools this project actually depends on — not merely mentions.
+
+    A substring scan of the manifest would propose ``ruff`` because a comment
+    says the word, and ``pytest`` because a ``tests/`` directory exists — and a
+    check for a tool that is not a dependency fails on every task, through no
+    fault of the task. So the manifest is parsed: a tool counts when it is a
+    dependency (a ``pytest-*`` plugin implies pytest), has a ``[tool.*]``
+    table, or has a config file of its own in the root.
+    """
+    try:
+        data = tomllib.loads(_text(root / "pyproject.toml"))
+    except tomllib.TOMLDecodeError:
+        data = {}
+    names = _python_dependency_names(data)
+    tables = data.get("tool") if isinstance(data.get("tool"), dict) else {}
     prefix = _python_prefix(root)
     found: list[Check] = []
 
     def declared(tool: str, *files: str) -> bool:
-        return tool in manifest or any((root / name).exists() for name in files)
+        depended = any(name == tool or name.startswith(f"{tool}-") for name in names)
+        configured = isinstance(tables, dict) and tool in tables
+        return depended or configured or any((root / name).exists() for name in files)
 
     if declared("ruff", "ruff.toml", ".ruff.toml"):
         found.append(Check("ruff", [*prefix, "ruff", "check", "."]))
     if declared("mypy", "mypy.ini", ".mypy.ini"):
         found.append(Check("mypy", [*prefix, "mypy", "."]))
-    if declared("pytest", "pytest.ini", "tox.ini") or (root / "tests").is_dir():
+    if declared("pytest", "pytest.ini"):
         found.append(Check("pytest", [*prefix, "pytest", "-q"]))
     return found
 
@@ -75,28 +120,37 @@ def _node_checks(root: Path) -> list[Check]:
     """Whatever the project already calls lint, typecheck and test.
 
     Only scripts that exist are proposed, and only the ones that end: a ``test``
-    script that opens a watcher would hang the runner, so the usual watch flag
-    is disabled where the runner knows how.
+    script that opens a watcher would hang the runner, so vitest — whose default
+    is to watch — gets its ``--run`` flag. Other runners get no flag at all;
+    jest, for one, refuses arguments it does not know.
     """
     try:
         manifest = json.loads(_text(root / "package.json") or "{}")
     except json.JSONDecodeError:
         return []
-    scripts = manifest.get("scripts") if isinstance(manifest, dict) else None
+    if not isinstance(manifest, dict):
+        return []
+    scripts = manifest.get("scripts")
     if not isinstance(scripts, dict):
         return []
     manager = _node_manager(root)
     if not manager:
         return []
+    dependencies: set[str] = set()
+    for key in ("dependencies", "devDependencies"):
+        section = manifest.get(key)
+        if isinstance(section, dict):
+            dependencies |= set(section)
 
     found: list[Check] = []
     for name in ("lint", "typecheck", "type-check", "tsc", "test"):
         if name not in scripts:
             continue
         command = [manager, "run", name] if manager != "yarn" else [manager, name]
-        if name == "test":
-            # vitest and jest both take this; npm needs the separator so the
-            # flag reaches the script rather than the package manager.
+        uses_vitest = "vitest" in dependencies or "vitest" in str(scripts.get("test") or "")
+        if name == "test" and uses_vitest:
+            # npm needs the separator so the flag reaches the script rather
+            # than the package manager.
             command += ["--", "--run"] if manager == "npm" else ["--run"]
         found.append(Check(name, command))
     return found

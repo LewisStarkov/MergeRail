@@ -46,8 +46,18 @@ def repo_root(path: Path) -> Path:
 
 
 def detect_base_branch(root: Path) -> str:
-    """``main`` if it exists, else ``master``, else whatever is checked out."""
-    for name in ("main", "master"):
+    """The default branch, as locally as possible.
+
+    ``origin/HEAD`` first, because a clone records what the remote considers
+    default — a repository whose life happens on ``develop`` should not be
+    guessed at ``main``. Then the usual names, then whatever is checked out.
+    Only branches that exist locally count: merging needs one.
+    """
+    recorded = git("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD", cwd=root, check=False)
+    remote_default = recorded.rsplit("/", 1)[-1] if recorded else ""
+    for name in (remote_default, "main", "master"):
+        if not name:
+            continue
         found = subprocess.run(
             ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
             cwd=root,
@@ -77,6 +87,32 @@ def remote_url(root: Path) -> str:
     return git("remote", "get-url", "origin", cwd=root, check=False)
 
 
+def ref_exists(root: Path, ref: str) -> bool:
+    """Whether ``ref`` resolves to a commit without changing the checkout."""
+    return bool(git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=root, check=False))
+
+
+def commit_exists(root: Path, commit: str) -> bool:
+    return bool(commit) and ref_exists(root, commit)
+
+
+def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    if not commit_exists(root, ancestor) or not commit_exists(root, descendant):
+        return False
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=root,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def attempt_branch(prefix: str, task_id: int, attempt: int) -> str:
+    """Stable, non-overlapping branch name for one fixer attempt."""
+    clean = prefix.rstrip("/")
+    return f"{clean}/{task_id}/a{max(attempt, 1)}"
+
+
 class Worktree:
     """One shared checkout, reset onto a fresh branch before each task."""
 
@@ -84,12 +120,21 @@ class Worktree:
         self.root = root
         self.path = path
 
-    def reset(self, branch: str, base: str) -> None:
-        """Put the worktree on a fresh ``branch`` cut from ``base``."""
+    def reset(self, branch: str, base: str, *, recreate: bool = False) -> None:
+        """Put the worktree on a fresh branch cut from ``base``.
+
+        Existing branches are protected by default. Passing ``recreate=True``
+        is reserved for disposable internal branches (for example a baseline
+        check), never task attempts.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not (self.path / ".git").exists():
             git("worktree", "prune", cwd=self.root)
             git("worktree", "add", "--detach", str(self.path), base, cwd=self.root)
+        if ref_exists(self.root, f"refs/heads/{branch}") and not recreate:
+            raise GitError(
+                f"refusing to reset existing branch '{branch}'; use a new attempt branch"
+            )
         # Let go of the previous task's branch *before* resetting. A `reset
         # --hard` while that branch is still checked out moves the branch
         # itself, which would quietly delete the work of the task that just
@@ -100,7 +145,10 @@ class Worktree:
         # and rebuilding those every task is minutes of wall clock and the
         # reason a first test run is so expensive.
         git("clean", "-fd", cwd=self.path)
-        git("checkout", "-B", branch, base, cwd=self.path)
+        if recreate:
+            git("checkout", "-B", branch, base, cwd=self.path)
+        else:
+            git("checkout", "-b", branch, base, cwd=self.path)
         log.info("worktree.ready", path=self.path, branch=branch)
 
     def detach(self, base: str) -> None:
@@ -121,11 +169,15 @@ class Worktree:
 __all__ = [
     "GitError",
     "Worktree",
+    "attempt_branch",
+    "commit_exists",
     "current_branch",
     "detect_base_branch",
     "git",
     "has_commits",
+    "is_ancestor",
     "is_repo",
+    "ref_exists",
     "remote_url",
     "repo_root",
 ]

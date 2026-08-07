@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentq</title>
+<link rel="stylesheet"
+ href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
+<style>
+  :root {
+    --bg: #ffffff; --card: #f4f4f4; --ink: #161616; --dim: #525252;
+    --line: #e0e0e0; --accent: #0f62fe; --accent-strong: #0043ce;
+    --danger: #da1e28; --sidebar: #f4f4f4; --sidebar-panel: #ffffff;
+    --sidebar-line: #c6c6c6; --sidebar-ink: #161616; --sidebar-dim: #525252;
+  }
+  * { box-sizing: border-box; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 "Helvetica Neue", Arial, sans-serif;
+  }
+  h1 { font-size: 1.05rem; letter-spacing: -.02em; margin: 0; }
+  form {
+    background: var(--card); border: 1px solid var(--line); border-radius: 0;
+    padding: .75rem; display: grid; gap: .5rem;
+  }
+  textarea {
+    border: 0; outline: 0; resize: vertical; min-height: 3.5rem;
+    background: transparent; color: inherit; font: inherit; width: 100%;
+  }
+  .row { display: flex; align-items: center; gap: .5rem; }
+  .row input[type=file] {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .row .primary { margin-left: auto; }
+  button {
+    display: inline-flex; align-items: center; gap: .4rem;
+    border: 1px solid var(--line); border-radius: 0; background: transparent;
+    color: inherit; font: inherit; padding: .42rem .72rem; cursor: pointer;
+  }
+  button:hover { border-color: var(--dim); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .attachment-control {
+    display: inline-flex; align-items: center; gap: .4rem; min-width: 0;
+    color: var(--sidebar-dim); cursor: pointer; font-size: .8rem;
+  }
+  .attachment-control span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  details.live {
+    border-top: 1px solid var(--line); margin-top: .65rem; padding-top: .55rem;
+  }
+  details.live > summary {
+    color: var(--dim); cursor: pointer; font-size: .8rem; list-style-position: outside;
+  }
+  .live-body { padding-top: .45rem; }
+  .live-role + .live-role { margin-top: .65rem; }
+  .live-head {
+    display: flex; align-items: center; gap: .4rem; color: var(--dim);
+    font-size: .78rem; text-transform: uppercase; letter-spacing: .045em;
+  }
+  .stream-output {
+    margin: .3rem 0 0; padding: .55rem .65rem; max-height: 18rem; overflow: auto;
+    border-radius: 0; background: var(--bg); color: var(--ink);
+    font: .82rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .tool-list { margin: .35rem 0 0; padding: 0; list-style: none; color: var(--dim); }
+  .tool-list li {
+    display: flex; gap: .4rem; align-items: start; font-size: .78rem;
+    overflow-wrap: anywhere;
+  }
+  .tool-list li .bi { color: var(--accent); }
+  .history { color: var(--dim); font-size: .78rem; margin-top: .35rem; }
+  .empty { color: var(--sidebar-dim); text-align: center; margin-top: 2.5rem; }
+  .empty-icon { display: block; margin-bottom: .35rem; font-size: 1.4rem; }
+  .workbench { display: grid; grid-template-columns: 20rem 1fr; min-height: 100vh; }
+  .sidebar {
+    height: 100vh; overflow: auto; padding: 0;
+    border-right: 1px solid var(--sidebar-line); background: var(--sidebar);
+    color: var(--sidebar-ink);
+    scrollbar-color: var(--sidebar-line) transparent;
+  }
+  .brand-row {
+    display: flex; align-items: center; height: 3rem; margin: 0; padding: 0 1rem;
+    background: #161616; color: #fff;
+  }
+  .brand { display: flex; align-items: center; gap: .7rem; }
+  .brand-icon {
+    display: grid; width: auto; height: 2rem; place-items: center;
+    border: 0; border-radius: 0; background: none; color: #78a9ff;
+  }
+  .brand-caption { color: #c6c6c6; font-size: .7rem; }
+  .queue-heading #summary {
+    margin-left: auto; color: var(--sidebar-dim); font-size: .72rem;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .sidebar form {
+    margin: 1rem; padding: .8rem; border-color: var(--sidebar-line); border-radius: 0;
+    background: var(--sidebar-panel);
+  }
+  .sidebar textarea { min-height: 4.5rem; color: var(--sidebar-ink); }
+  .sidebar textarea::placeholder { color: #8d8d8d; }
+  .queue-heading {
+    display: flex; align-items: center; gap: .5rem; margin: 1.5rem 1rem .5rem;
+    color: var(--sidebar-dim);
+  }
+  .queue-heading h2 {
+    margin: 0; font-size: .7rem; font-weight: 650; letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .queue-list .task {
+    display: block; width: 100%; margin: 0; padding: .75rem 1rem;
+    border: solid var(--line); border-width: 1px 0 0; border-radius: 0; background: transparent;
+    color: var(--sidebar-ink); cursor: pointer; text-align: left;
+  }
+  .queue-list .task:hover { background: #e8e8e8; }
+  .queue-list .task.selected { border-left: 4px solid var(--accent); background: #e0e0e0; }
+  .queue-list .task header { display: flex; align-items: start; gap: .55rem; }
+  .queue-list .task .status-icon { margin-top: .08rem; color: var(--dim); }
+  .queue-list .task.selected .status-icon { color: var(--accent); }
+  .queue-list .task .id { color: var(--dim); font: .75rem ui-monospace, monospace; }
+  .queue-list .task .text {
+    display: -webkit-box; flex: 1; overflow: hidden; overflow-wrap: anywhere;
+    -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.4;
+  }
+  .queue-list .task .meta {
+    display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start;
+    gap: .7rem; margin: .35rem 0 0 2.65rem;
+    color: var(--sidebar-dim); font-size: .72rem;
+  }
+  .queue-list .task .meta span { display: inline-flex; align-items: center; gap: .3rem; }
+  .detail { height: 100vh; overflow: auto; background: var(--bg); }
+  .detail-empty {
+    display: grid; min-height: 100%; place-items: center; padding: 2rem;
+    color: var(--dim); text-align: center;
+  }
+  .detail-top {
+    position: sticky; z-index: 2; top: 0; display: flex; align-items: center;
+    gap: .65rem; min-height: 3rem; padding: .5rem 1rem;
+    border-bottom: 1px solid var(--line); background: #161616; color: #fff;
+  }
+  .detail-status { display: inline-flex; align-items: center; gap: .5rem; color: #c6c6c6; }
+  .detail-status .status-icon { color: var(--accent); }
+  .detail-actions { display: flex; gap: .45rem; margin-left: auto; }
+  .detail-actions button { color: var(--dim); background: var(--bg); }
+  .detail-actions button[data-verb="delete"] { color: var(--danger); }
+  .detail-body { width: 100%; padding: 2.5rem clamp(2rem, 5vw, 4.5rem) 6rem; }
+  .detail-title {
+    max-width: 62rem; margin: 0 0 2.4rem; font-size: clamp(1.8rem, 3.4vw, 3rem);
+    font-weight: 300; line-height: 1.08; letter-spacing: -.01em; white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .facts {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    gap: 0; border: 1px solid var(--line); border-radius: 0; background: var(--card);
+  }
+  .fact { min-width: 0; padding: .8rem 1rem; }
+  .fact + .fact { border-left: 1px solid var(--line); }
+  .fact-label {
+    display: flex; align-items: center; gap: .35rem; color: var(--dim); font-size: .7rem;
+  }
+  .fact-value {
+    margin-top: .25rem; overflow-wrap: anywhere;
+    font: .78rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  .detail-section { margin-top: 2rem; }
+  .detail-section h3 {
+    display: flex; align-items: center; gap: .45rem; margin: 0 0 .65rem;
+    color: var(--dim); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .detail-note {
+    padding: 1.1rem 1.2rem; border: 1px solid var(--line); border-radius: 0;
+    background: var(--card); white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .detail-note.blocked { border-color: var(--danger); }
+  .detail-section.result .detail-note { font-size: .96rem; line-height: 1.65; }
+  .detail-section a { display: inline-flex; align-items: center; gap: .4rem; color: var(--accent); }
+  .detail .live {
+    margin-top: 2rem; padding: .85rem 1rem; border: 1px solid var(--line);
+    border-radius: 0; background: var(--card);
+  }
+  .detail .live > summary { display: flex; align-items: center; gap: .5rem; }
+  .detail .live > summary::marker { content: ""; }
+  .detail .live > summary .activity-chevron { margin-left: auto; }
+  .detail .live[open] > summary .activity-chevron { transform: rotate(90deg); }
+
+  @media (max-width: 760px) {
+    .workbench { display: block; }
+    .sidebar {
+      height: auto; max-height: 48vh; border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .detail { height: auto; min-height: 52vh; }
+    .detail-top { position: static; padding: .8rem 1rem; }
+    .detail-body { padding: 1.5rem 1rem 4rem; }
+    .detail-title { font-size: clamp(1.55rem, 8vw, 2.2rem); }
+    .facts { grid-template-columns: 1fr 1fr; }
+    .fact:nth-child(odd) { border-left: 0; }
+    .fact:nth-child(n+3) { border-top: 1px solid var(--line); }
+  }
+</style>
+<body>
+<div class="workbench">
+  <aside class="sidebar">
+    <div class="brand-row">
+      <div class="brand">
+        <span class="brand-icon"><i class="bi bi-terminal" aria-hidden="true"></i></span>
+        <div>
+          <h1>agentq</h1>
+          <div class="brand-caption">Agent workbench</div>
+        </div>
+      </div>
+    </div>
+    <form id="composer">
+      <textarea id="text" placeholder="Describe a task…"></textarea>
+      <div class="row">
+        <input type="file" id="file">
+        <label class="attachment-control" for="file">
+          <i class="bi bi-paperclip" aria-hidden="true"></i>
+          <span id="file-label">Attach context</span>
+        </label>
+        <button type="submit" class="primary">
+          <i class="bi bi-arrow-up" aria-hidden="true"></i> Queue
+        </button>
+      </div>
+    </form>
+    <div class="queue-heading">
+      <h2>Tasks</h2>
+      <span id="summary"></span>
+    </div>
+    <div class="queue-list" id="tasks"></div>
+  </aside>
+  <main class="detail" id="detail"></main>
+</div>
+<script>
+let rendered = "";  // rebuild the list only when it changed, so a button
+                    // cannot move out from under a click mid-poll
+const expandedStreams = new Set();
+let selectedTaskId = null;
+let taskSnapshot = [];
+const statusIcons = {
+  new: "circle", running: "arrow-repeat", review: "search", approved: "check2-circle",
+  delivering: "git", done: "check2", failed: "x-lg", blocked: "exclamation-triangle",
+  closed: "archive",
+};
+async function refresh() {
+  let raw;
+  try {
+    raw = await (await fetch("/api/tasks")).text();
+  } catch { return; }  // the runner is restarting; the next poll will find it
+  renderPayload(raw);
+}
+
+function renderPayload(raw) {
+  const payload = JSON.parse(raw);
+  const signature = JSON.stringify(payload);
+  if (signature === rendered) return;
+  rendered = signature;
+  const tasks = payload.tasks || [];
+  taskSnapshot = tasks;
+  if (!tasks.some((task) => task.id === selectedTaskId))
+    selectedTaskId = (tasks.find((task) => task.open) || tasks[0] || {}).id || null;
+  const open = tasks.filter((t) => t.open).length;
+  document.getElementById("summary").textContent =
+    tasks.length ? `${open} open · ${tasks.length} total` : "";
+  const root = document.getElementById("tasks");
+  root.replaceChildren(...(tasks.length ? tasks.map(card) : [empty()]));
+  renderDetail(tasks.find((task) => task.id === selectedTaskId));
+}
+
+function empty() {
+  const el = document.createElement("div");
+  el.className = "empty";
+  el.append(
+    icon("inbox", "empty-icon"),
+    line("div", "", "Nothing queued. Write something above."),
+  );
+  return el;
+}
+
+function card(t) {
+  const el = document.createElement("article");
+  el.className = `task${t.id === selectedTaskId ? " selected" : ""}`;
+  el.dataset.id = String(t.id);
+  el.tabIndex = 0;
+  el.setAttribute("role", "button");
+  el.onclick = () => selectTask(t.id);
+  el.onkeydown = (event) => {
+    if (event.key === "Enter" || event.key === " ") selectTask(t.id);
+  };
+  const head = document.createElement("header");
+  head.append(
+    icon(statusIcons[t.status] || "circle", "status-icon"),
+    line("span", "id", `#${t.id}`),
+    line("span", "text", t.text || "(attachment only)"),
+  );
+  el.append(head);
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.append(line("span", "", t.status));
+  if (t.file) meta.append(metaItem("paperclip", "attachment"));
+  if (t.branch) meta.append(metaItem("git", t.branch));
+  if (t.attempts > 1) meta.append(metaItem("arrow-repeat", `attempt ${t.attempts}`));
+  el.append(meta);
+  return el;
+}
+
+function metaItem(name, text) {
+  const item = document.createElement("span");
+  item.append(icon(name), line("span", "", text));
+  return item;
+}
+
+function selectTask(id) {
+  selectedTaskId = id;
+  document.querySelectorAll(".queue-list .task").forEach((task) =>
+    task.classList.toggle("selected", Number(task.dataset.id) === id));
+  renderDetail(taskSnapshot.find((task) => task.id === id));
+}
+
+function renderDetail(t) {
+  const root = document.getElementById("detail");
+  if (!t) {
+    const blank = line("div", "detail-empty", "Select a task from the queue.");
+    root.replaceChildren(blank);
+    return;
+  }
+  const top = document.createElement("header");
+  top.className = "detail-top";
+  const status = document.createElement("span");
+  status.className = "detail-status";
+  status.append(
+    icon(statusIcons[t.status] || "circle", "status-icon"),
+    line("span", "", `Task #${t.id} · ${t.status}`),
+  );
+  top.append(status, actions(t));
+  const body = document.createElement("div");
+  body.className = "detail-body";
+  body.append(line("h2", "detail-title", t.text || "Attachment-only task"));
+  const facts = document.createElement("div");
+  facts.className = "facts";
+  facts.append(
+    fact("Source", t.source || "web", "inbox"),
+    fact("Branch", t.branch || "Not created", "git"),
+    fact("Attempt", String(t.attempts || 1), "arrow-repeat"),
+  );
+  if (t.cost_usd) facts.append(fact("Cost", `$${t.cost_usd.toFixed(2)}`, "currency-dollar"));
+  body.append(facts);
+  if (t.delivery) body.append(delivery(t.delivery));
+  if (t.live && Object.keys(t.live.roles || {}).length) body.append(live(t.id, t.live));
+  if (t.note) body.append(section("Result", t.note, "check2-square"));
+  if (t.url && /^https?:\/\//.test(t.url)) {
+    const link = document.createElement("a");
+    link.href = t.url;
+    link.target = "_blank";
+    link.append(icon("box-arrow-up-right"), line("span", "", "Open pull request"));
+    const wrap = document.createElement("div");
+    wrap.className = "detail-section";
+    wrap.append(link);
+    body.append(wrap);
+  }
+  root.replaceChildren(top, body);
+}
+
+function fact(label, value, iconName) {
+  const item = document.createElement("div");
+  item.className = "fact";
+  const caption = document.createElement("div");
+  caption.className = "fact-label";
+  caption.append(icon(iconName), line("span", "", label));
+  item.append(caption, line("div", "fact-value", value));
+  return item;
+}
+
+function section(title, text, iconName) {
+  const wrap = document.createElement("section");
+  wrap.className = `detail-section ${title.toLowerCase()}`;
+  const heading = document.createElement("h3");
+  heading.append(icon(iconName), line("span", "", title));
+  wrap.append(heading, line("div", "detail-note", text));
+  return wrap;
+}
+
+function delivery(value) {
+  const wrap = section("Delivery", value.status || "pending", "git");
+  const note = wrap.querySelector(".detail-note");
+  if (value.status === "blocked") note.classList.add("blocked");
+  if (value.error) note.textContent += `
+${value.error}`;
+  return wrap;
+}
+
+function live(taskId, trace) {
+  const box = document.createElement("details");
+  box.className = "live";
+  box.open = expandedStreams.has(taskId);
+  box.ontoggle = () => box.open ? expandedStreams.add(taskId) : expandedStreams.delete(taskId);
+  const states = Object.entries(trace.roles || {})
+    .map(([name, state]) => `${name}: ${state.status || "live"}`)
+    .join(" · ");
+  const summary = document.createElement("summary");
+  summary.append(
+    icon("terminal"),
+    line(
+      "span",
+      "",
+      `Agent activity · ${trace.stage || "working"}${states ? ` · ${states}` : ""}`,
+    ),
+    icon("chevron-right", "activity-chevron"),
+  );
+  box.append(summary);
+  const body = document.createElement("div");
+  body.className = "live-body";
+  body.setAttribute("aria-live", "polite");
+  for (const [name, state] of Object.entries(trace.roles || {})) {
+    const role = document.createElement("div");
+    role.className = "live-role";
+    const head = document.createElement("div");
+    head.className = `live-head ${state.status || ""}`;
+    head.append(icon("cpu"), line("span", "", `${name} · ${state.status || "live"}`));
+    role.append(head);
+    if (state.text) {
+      const output = line("pre", "stream-output", state.text);
+      role.append(output);
+      requestAnimationFrame(() => { output.scrollTop = output.scrollHeight; });
+    }
+    const tools = (state.tools || []).slice(-6);
+    if (tools.length) {
+      const list = document.createElement("ul");
+      list.className = "tool-list";
+      list.append(...tools.map((tool) => {
+        const item = document.createElement("li");
+        item.append(icon("wrench-adjustable-circle"), line("span", "", tool));
+        return item;
+      }));
+      role.append(list);
+    }
+    if ((state.history || []).length) {
+      const earlier = document.createElement("details");
+      earlier.className = "history";
+      const label = document.createElement("summary");
+      label.append(
+        icon("clock-history"),
+        line("span", "", `${state.history.length} earlier response(s)`),
+      );
+      earlier.append(label, ...state.history.map((text) => line("pre", "stream-output", text)));
+      role.append(earlier);
+    }
+    body.append(role);
+  }
+  box.append(body);
+  return box;
+}
+
+function actions(t) {
+  const box = document.createElement("span");
+  box.className = "detail-actions";
+  if (!t.open && t.delivery && t.delivery.status === "blocked")
+    box.append(act(t.id, "retry-delivery", "retry delivery"));
+  if (!t.open) box.append(act(t.id, "retry-task", "retry task"));
+  if (["running", "review"].includes(t.status))
+    box.append(act(t.id, "cancel", "cancel"));
+  if (t.open && t.status === "new") box.append(act(t.id, "close", "close"));
+  if (!["running", "review", "approved", "delivering", "cancelling"].includes(t.status))
+    box.append(act(t.id, "delete", "delete"));
+  return box;
+}
+
+function act(id, verb, label) {
+  const el = document.createElement("button");
+  el.type = "button";
+  el.dataset.verb = verb;
+  const icons = {
+    "retry-delivery": "git", "retry-task": "arrow-clockwise",
+    cancel: "stop-circle", close: "x-lg", delete: "trash3",
+  };
+  el.append(icon(icons[verb] || "circle"), line("span", "", label));
+  el.onclick = async () => {
+    await fetch(`/api/tasks/${id}/${verb}`, {method: "POST"});
+    refresh();
+  };
+  return el;
+}
+
+function line(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  el.textContent = text;
+  return el;
+}
+
+function icon(name, cls = "") {
+  const el = document.createElement("i");
+  el.className = `bi bi-${name}${cls ? ` ${cls}` : ""}`;
+  el.setAttribute("aria-hidden", "true");
+  return el;
+}
+
+document.getElementById("composer").onsubmit = async (event) => {
+  event.preventDefault();
+  const text = document.getElementById("text");
+  const picker = document.getElementById("file");
+  const payload = {text: text.value};
+  const file = picker.files[0];
+  if (file) {
+    const data = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(file);
+    });
+    payload.file = {name: file.name, data: String(data).split(",", 2)[1]};
+  }
+  const sent = await fetch("/api/tasks", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  if (sent.ok) {
+    text.value = "";
+    picker.value = "";
+    document.getElementById("file-label").textContent = "Attach context";
+  }
+  refresh();
+};
+
+document.getElementById("file").onchange = (event) => {
+  document.getElementById("file-label").textContent =
+    event.target.files[0]?.name || "Attach context";
+};
+
+document.getElementById("text").addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter")
+    document.getElementById("composer").requestSubmit();
+});
+
+refresh();
+const events = new EventSource("/api/events");
+events.onmessage = (event) => renderPayload(event.data);
+setInterval(refresh, 15000);  // fallback for browsers or proxies that interrupt SSE
+</script>
+</body>
+</html>

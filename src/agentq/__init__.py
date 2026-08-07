@@ -10,8 +10,8 @@ The embedded version, when you want the runner to own your app process too::
 
     Runner(front="telegram").run()
 
-Anything else is a front: implement :class:`~agentq.fronts.base.Front` — two
-methods — and pass an instance instead of a name.
+Anything else is a front: implement :class:`~agentq.fronts.base.Front` and pass
+an instance instead of a name. Live streaming is an optional third hook.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from __future__ import annotations
 from .agent import AgentOptions, AgentReply, ClaudeAgent
 from .config import Config
 from .detect import Check, detect_checks
-from .fronts import FolderFront, Front, TelegramFront, make_front
+from .fronts import FolderFront, Front, StreamEvent, TelegramFront, WebFront, make_front
 from .runner import Runner
 from .supervisor import Supervisor
 from .tasks import Status, Task, TaskStore
@@ -36,10 +36,12 @@ __all__ = [
     "Front",
     "Runner",
     "Status",
+    "StreamEvent",
     "Supervisor",
     "Task",
     "TaskStore",
     "TelegramFront",
+    "WebFront",
     "__version__",
     "detect_checks",
     "make_front",

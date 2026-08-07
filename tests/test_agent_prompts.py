@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentq.agent import AgentOptions, ClaudeAgent, context_size, parse_event, tool_hint
-from agentq.prompts import fix, review, verdict_of
+from agentq.prompts import answer_of, fix, fixer_system, review, reviewer_system, verdict_of
 from agentq.tasks import Task
 
 
@@ -49,8 +49,23 @@ def test_a_missing_usage_block_does_not_shrink_the_measurement() -> None:
 def test_the_reviewer_cannot_edit() -> None:
     reviewer = ClaudeAgent("reviewer", Path("/tmp"), AgentOptions(), read_only=True)
     command = reviewer.command("hi")
-    assert "--disallowed-tools" in command
+    denied = command[command.index("--disallowed-tools") + 1]
+    assert "Edit" in denied
     assert "--dangerously-skip-permissions" not in command
+
+
+def test_no_agent_can_push() -> None:
+    # Delivery pushes; agents never. A rule at the CLI level, not a request.
+    for one in (agent(), ClaudeAgent("reviewer", Path("/tmp"), AgentOptions(), read_only=True)):
+        command = one.command("hi")
+        assert "git push" in command[command.index("--disallowed-tools") + 1]
+
+
+def test_the_system_prompt_rides_outside_the_conversation() -> None:
+    one = ClaudeAgent("fixer", Path("/tmp"), AgentOptions(), system_prompt="the rules")
+    command = one.command("hi")
+    assert command[command.index("--append-system-prompt") + 1] == "the rules"
+    assert "--append-system-prompt" not in agent().command("hi")
 
 
 def test_skip_permissions_is_opt_in() -> None:
@@ -84,13 +99,34 @@ def test_the_last_verdict_wins() -> None:
     assert verdict_of("I liked it") is None
 
 
-def test_prompts_carry_the_repository_rules_by_reference() -> None:
-    task = Task(id=1, text="fix it")
-    body = fix(task, "agentq/1", "main", ["CLAUDE.md"], "")
-    assert "CLAUDE.md" in body
-    assert "agentq/1" in body
-    assert "Do not push" in body
+def test_the_rules_live_in_the_system_prompts() -> None:
+    rules = fixer_system(["CLAUDE.md"])
+    assert "CLAUDE.md" in rules
+    assert "Do not push" in rules
+    assert "ANSWER:" in rules
 
-    verdict = review(task, "agentq/1", "main", [], "ruff: PASS")
-    assert "VERDICT: APPROVE" in verdict
+    plain = reviewer_system([], structured=False)
+    assert "VERDICT: APPROVE" in plain
+    structured = reviewer_system([], structured=True)
+    assert "structured output" in structured
+
+
+def test_the_task_prompts_carry_only_the_task() -> None:
+    task = Task(id=1, text="fix it")
+    body = fix(task, "agentq/1", "main", "")
+    assert "agentq/1" in body and "fix it" in body
+
+    verdict = review(task, "agentq/1", "main", "ruff: PASS", "tiny diff", "one.txt | 2 +-")
     assert "ruff: PASS" in verdict
+    assert "tiny diff" in verdict  # short diffs ride along, saving a round-trip
+
+    huge = review(task, "agentq/1", "main", "ruff: PASS", "x" * 9000, "one.txt | 2 +-")
+    assert "x" * 100 not in huge  # long ones are read in the worktree instead
+    assert "one.txt" in huge
+
+
+def test_the_answer_marker_is_the_way_out_of_committing() -> None:
+    assert answer_of("ANSWER: it already works") == "it already works"
+    assert answer_of("  ANSWER:\nlong explanation") == "long explanation"
+    assert answer_of("I changed three files") is None
+    assert answer_of("") is None
