@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agentq.fronts.base import StreamEvent
 from agentq.fronts.folder import FolderFront
-from agentq.fronts.telegram import TelegramFront
+from agentq.fronts.telegram import HELP, TelegramFront
 from agentq.tasks import Status, Task, TaskStore
 
 
@@ -17,6 +18,8 @@ class Recording(TelegramFront):
 
     def api(self, method: str, *, http_timeout: int = 20, **payload: Any) -> Any:
         self.calls.append((method, payload))
+        if method == "sendMessage":
+            return {"message_id": len(self.calls)}
         return None
 
     @property
@@ -94,6 +97,93 @@ def test_retry_puts_a_failed_task_back(tmp_path: Path) -> None:
     assert reloaded is not None and reloaded.status == Status.NEW
 
 
+def test_message_adds_a_multiword_instruction_and_reopens_a_terminal_task(
+    tmp_path: Path,
+) -> None:
+    store = TaskStore(tmp_path / "tasks.json")
+    front = Recording(store, {5}, tmp_path)
+    task = store.add("fix it")
+    store.update(task.id, status=Status.DONE, note="first run")
+
+    front._handle(message("/message 1 also update the release notes"))
+
+    (saved,) = store.messages(task.id)
+    assert saved.text == "also update the release notes"
+    assert saved.mode == "instruction"
+    assert saved.status == "pending"
+    assert saved.author == "telegram:user-5"
+    reloaded = store.get(task.id)
+    assert reloaded is not None and reloaded.status == Status.NEW
+    assert len(reloaded.runs) == 1
+    assert "Message queued" in front.messages[-1]
+    assert "Task reopened" in front.messages[-1]
+
+
+def test_comment_is_stored_without_reopening_a_terminal_task(tmp_path: Path) -> None:
+    store = TaskStore(tmp_path / "tasks.json")
+    front = Recording(store, {5}, tmp_path)
+    task = store.add("fix it")
+    store.update(task.id, status=Status.FAILED)
+
+    update = message("/comment 1 this is context only")
+    update["message"]["from"]["username"] = "lama"
+    front._handle(update)
+
+    (saved,) = store.messages(task.id)
+    assert (saved.text, saved.mode, saved.status) == (
+        "this is context only",
+        "comment",
+        "stored",
+    )
+    assert saved.author == "telegram:@lama"
+    reloaded = store.get(task.id)
+    assert reloaded is not None and reloaded.status == Status.FAILED
+    assert reloaded.runs == []
+    assert "Comment stored" in front.messages[-1]
+
+
+def test_thread_commands_validate_task_and_body(tmp_path: Path) -> None:
+    store = TaskStore(tmp_path / "tasks.json")
+    front = Recording(store, {5}, tmp_path)
+    store.add("fix it")
+
+    front._handle(message("/message nope text"))
+    front._handle(message("/message 99 text"))
+    front._handle(message("/comment 1"))
+
+    assert "Usage:" in front.messages[-3]
+    assert "No task #99" in front.messages[-2]
+    assert "Write some text" in front.messages[-1]
+    assert store.messages(1) == []
+
+
+def test_show_includes_recent_thread_messages_and_pending_count(tmp_path: Path) -> None:
+    store = TaskStore(tmp_path / "tasks.json")
+    front = Recording(store, {5}, tmp_path)
+    task = store.add("x" * 10_000)
+    for number in range(4):
+        store.append_message(
+            task.id,
+            f"thread message {number} " + "<>&" * 500,
+            mode="comment" if number == 0 else "instruction",
+            author=f"person-{number}",
+        )
+
+    front._handle(message("/show 1"))
+
+    card = front.messages[-1]
+    assert "4 messages · 3 pending" in card
+    assert "thread message 0" not in card
+    assert "thread message 1" in card
+    assert "thread message 3" in card
+    assert len(card) <= 4000
+
+
+def test_help_describes_thread_commands() -> None:
+    assert "/message &lt;id&gt; &lt;text&gt;" in HELP
+    assert "/comment &lt;id&gt; &lt;text&gt;" in HELP
+
+
 def test_reports_go_back_to_whoever_asked(tmp_path: Path) -> None:
     store = TaskStore(tmp_path / "tasks.json")
     front = Recording(store, {5}, tmp_path)
@@ -133,6 +223,66 @@ def test_the_offset_moves_past_handled_updates(tmp_path: Path) -> None:
     reloaded._load_state()
     assert reloaded.offset == 41
     assert reloaded.admins == {5}
+
+
+class SetupStub:
+    def __init__(self) -> None:
+        self.received: dict[str, object] = {}
+
+    def setup_snapshot(self) -> dict[str, Any]:
+        return {
+            "agents": {"codex": {"available": True}},
+            "values": {},
+        }
+
+    def apply_setup(self, payload: Any, progress: Any) -> tuple[int, dict[str, Any]]:
+        self.received = dict(payload)
+        progress("validating", "Checking answers")
+        progress("saving", "Writing agentq.toml")
+        progress("complete", "Ready")
+        return 200, {"ok": True}
+
+
+def test_init_guides_the_user_and_edits_realtime_progress(tmp_path: Path) -> None:
+    front = Recording(TaskStore(tmp_path / "tasks.json"), {5}, tmp_path)
+    setup = SetupStub()
+    front.bind_setup(setup)
+
+    for answer in (
+        "/init",
+        "codex",
+        "production",
+        "prepare release",
+        "ask",
+    ):
+        front._handle(message(answer))
+
+    assert setup.received == {
+        "agent": "codex",
+        "environment": "production",
+        "summary": "prepare release",
+        "external_actions": "ask",
+    }
+    assert any("1/4" in text for text in front.messages)
+    edits = [payload["text"] for method, payload in front.calls if method == "editMessageText"]
+    assert any("saving" in text for text in edits)
+    assert "Setup complete" in edits[-1]
+
+
+def test_agent_progress_updates_one_telegram_message(tmp_path: Path) -> None:
+    front = Recording(TaskStore(tmp_path / "tasks.json"), {5}, tmp_path)
+    task = Task(id=7, text="fix it", source="telegram", origin={"chat_id": "5"})
+
+    front.stream(task, StreamEvent("runner", "reset"))
+    front.stream(task, StreamEvent("fixer", "status", "round 1"))
+    front.stream(task, StreamEvent("fixer", "text", "working"))
+    front.stream(task, StreamEvent("fixer", "result", "done"))
+
+    sent = [payload for method, payload in front.calls if method == "sendMessage"]
+    edited = [payload for method, payload in front.calls if method == "editMessageText"]
+    assert len(sent) == 1
+    assert edited
+    assert "done" in edited[-1]["text"]
 
 
 def test_the_folder_front_takes_files_and_writes_answers(tmp_path: Path) -> None:

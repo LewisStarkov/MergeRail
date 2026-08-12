@@ -34,10 +34,10 @@ from typing import Any
 
 from .filelock import exclusive_file
 
-#: Version 2 makes approval and delivery durable, rather than inferring them
-#: from a terminal note. Version 1 remains readable and is backed up before
-#: the first version 2 write.
-SCHEMA_VERSION = 3
+#: Version 4 adds durable agent sessions and an execution history. Older
+#: versions remain readable and are backed up before their first version 4
+#: write.
+SCHEMA_VERSION = 4
 
 
 class QueueCorruptError(RuntimeError):
@@ -96,6 +96,20 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(slots=True)
 class DeliveryError:
     """One failed delivery step; earlier errors are retained for diagnosis."""
@@ -151,6 +165,90 @@ class DeliveryRecord:
 
 
 @dataclass(slots=True)
+class TaskMessage:
+    """One folded message from a task's append-only thread journal."""
+
+    id: int
+    text: str
+    role: str = "user"
+    mode: str = "instruction"
+    author: str = ""
+    file: str | None = None
+    status: str = "stored"
+    idempotency_key: str = ""
+    attempt: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> TaskMessage:
+        known = {item.name for item in fields(cls)}
+        data = {key: value for key, value in raw.items() if key in known}
+        data["id"] = _safe_int(data.get("id", 0))
+        data["text"] = str(data.get("text", ""))
+        data["role"] = str(data.get("role", "user"))
+        data["mode"] = str(data.get("mode", "instruction"))
+        data["author"] = str(data.get("author", ""))
+        data["status"] = str(data.get("status", "stored"))
+        data["idempotency_key"] = str(data.get("idempotency_key", ""))
+        data["attempt"] = _safe_int(data.get("attempt", 0))
+        data["created_at"] = str(data.get("created_at", ""))
+        data["updated_at"] = str(data.get("updated_at", ""))
+        file = data.get("file")
+        data["file"] = str(file) if file is not None else None
+        return cls(**data)
+
+
+@dataclass(slots=True)
+class TaskSession:
+    """A resumable backend session owned by one task and agent role."""
+
+    role: str
+    backend: str
+    session_id: str
+    context_tokens: int = 0
+    updated_at: str = ""
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> TaskSession:
+        return cls(
+            role=str(raw.get("role", "")),
+            backend=str(raw.get("backend", "")),
+            session_id=str(raw.get("session_id", "")),
+            context_tokens=_safe_int(raw.get("context_tokens", 0)),
+            updated_at=str(raw.get("updated_at", "")),
+        )
+
+
+@dataclass(slots=True)
+class TaskRun:
+    """Immutable snapshot of one completed execution before a follow-up run."""
+
+    attempt: int
+    status: str
+    branch: str | None = None
+    approved_sha: str = ""
+    delivery: DeliveryRecord = field(default_factory=DeliveryRecord)
+    note: str = ""
+    url: str = ""
+    cost_usd: float = 0.0
+    started_at: str = ""
+    finished_at: str = ""
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> TaskRun:
+        known = {item.name for item in fields(cls)} - {"delivery"}
+        data = {key: value for key, value in raw.items() if key in known}
+        data["attempt"] = _safe_int(data.get("attempt", 0))
+        data["status"] = str(data.get("status", ""))
+        data["cost_usd"] = _safe_float(data.get("cost_usd", 0.0))
+        return cls(**data, delivery=DeliveryRecord.from_dict(raw.get("delivery")))
+
+
+@dataclass(slots=True)
 class Task:
     """One line of work, as a person wrote it, plus everything since."""
 
@@ -186,6 +284,10 @@ class Task:
     note: str = ""
     #: What the agents spent on this task, in dollars, across every round.
     cost_usd: float = 0.0
+    #: Resumable backend sessions, keyed by agent role (fixer, reviewer, ...).
+    sessions: dict[str, TaskSession] = field(default_factory=dict)
+    #: Previous terminal executions, retained when the task is retried.
+    runs: list[TaskRun] = field(default_factory=list)
 
     @property
     def icon(self) -> str:
@@ -206,14 +308,36 @@ class Task:
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, schema_version: int = SCHEMA_VERSION) -> Task:
         """Tolerant on purpose: a file written by an older build still loads."""
-        known = {item.name for item in fields(cls)} - {"delivery"}
+        known = {item.name for item in fields(cls)} - {"delivery", "sessions", "runs"}
         data = {key: value for key, value in raw.items() if key in known}
         data.setdefault("id", 0)
         data.setdefault("text", "")
         delivery = DeliveryRecord.from_dict(raw.get("delivery"))
+        raw_sessions = raw.get("sessions", {})
+        sessions: dict[str, TaskSession] = {}
+        if isinstance(raw_sessions, dict):
+            for role, item in raw_sessions.items():
+                if not isinstance(item, dict):
+                    continue
+                session = TaskSession.from_dict({**item, "role": role})
+                if session.role:
+                    sessions[session.role] = session
+        elif isinstance(raw_sessions, list):
+            for item in raw_sessions:
+                if not isinstance(item, dict):
+                    continue
+                session = TaskSession.from_dict(item)
+                if session.role:
+                    sessions[session.role] = session
+        raw_runs = raw.get("runs", [])
+        runs = (
+            [TaskRun.from_dict(item) for item in raw_runs if isinstance(item, dict)]
+            if isinstance(raw_runs, list)
+            else []
+        )
         if schema_version < 2 and data.get("status") == Status.BLOCKED:
             data["legacy_blocked"] = True
-        return cls(**data, delivery=delivery)
+        return cls(**data, delivery=delivery, sessions=sessions, runs=runs)
 
 
 class TaskStore:
@@ -222,6 +346,7 @@ class TaskStore:
     def __init__(self, path: Path, *, claimant: str = "") -> None:
         self.path = path
         self.media_dir = path.parent / "media"
+        self.threads_dir = path.parent / "threads"
         self.archive_path = path.with_name(f"{path.stem}.archive.jsonl")
         self.claimant = claimant
 
@@ -236,6 +361,164 @@ class TaskStore:
 
     def open_tasks(self) -> list[Task]:
         return [task for task in self.load() if task.is_open]
+
+    # --- task threads ----------------------------------------------------
+
+    def append_message(
+        self,
+        task_id: int,
+        text: str,
+        *,
+        role: str = "user",
+        mode: str = "instruction",
+        author: str = "",
+        file: str | None = None,
+        idempotency_key: str = "",
+        status: str | None = None,
+    ) -> TaskMessage | None:
+        """Append a message, returning the existing one for a duplicate key."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+        path = self._thread_path(task_id)
+        with self._thread_locked(task_id):
+            current = self._read_thread(path)
+            if idempotency_key:
+                duplicate = next(
+                    (item for item in current if item.idempotency_key == idempotency_key),
+                    None,
+                )
+                if duplicate is not None:
+                    return duplicate
+            stamp = now_iso()
+            message = TaskMessage(
+                id=max((item.id for item in current), default=0) + 1,
+                text=text.strip(),
+                role=role,
+                mode=mode,
+                author=author,
+                file=file,
+                status=(
+                    status
+                    if status is not None
+                    else "pending"
+                    if role == "user" and mode == "instruction"
+                    else "stored"
+                ),
+                idempotency_key=idempotency_key,
+                attempt=task.attempts,
+                created_at=stamp,
+                updated_at=stamp,
+            )
+            self._append_thread_event(path, {"event": "message", "message": message.to_dict()})
+            return message
+
+    def messages(self, task_id: int, *, after: int = 0, limit: int = 100) -> list[TaskMessage]:
+        """Read the folded thread in message-id order."""
+        if limit <= 0:
+            return []
+        with self._thread_locked(task_id):
+            messages = self._read_thread(self._thread_path(task_id))
+        return [item for item in messages if item.id > after][:limit]
+
+    def message_stats(self, task_id: int) -> dict[str, int | str]:
+        messages = self.messages(task_id, limit=2**31 - 1)
+        try:
+            revision = self._thread_path(task_id).stat().st_size
+        except OSError:
+            revision = 0
+        return {
+            "message_count": len(messages),
+            "pending_message_count": sum(item.status == "pending" for item in messages),
+            "last_message_at": max(
+                (item.updated_at or item.created_at for item in messages), default=""
+            ),
+            "message_revision": revision,
+        }
+
+    def claim_pending_messages(self, task_id: int) -> list[TaskMessage]:
+        """Atomically move every pending instruction to ``processing``."""
+        path = self._thread_path(task_id)
+        with self._thread_locked(task_id):
+            messages = self._read_thread(path)
+            pending = [item for item in messages if item.status == "pending"]
+            if not pending:
+                return []
+            stamp = now_iso()
+            for message in pending:
+                self._append_thread_event(
+                    path,
+                    {
+                        "event": "update",
+                        "message_id": message.id,
+                        "changes": {"status": "processing", "updated_at": stamp},
+                    },
+                )
+                message.status = "processing"
+                message.updated_at = stamp
+            return pending
+
+    def update_message(self, task_id: int, message_id: int, **changes: Any) -> TaskMessage | None:
+        """Append an update event and return the newly folded message."""
+        immutable = {"id", "created_at", "idempotency_key"}
+        known = {item.name for item in fields(TaskMessage)} - immutable
+        accepted = {key: value for key, value in changes.items() if key in known}
+        path = self._thread_path(task_id)
+        with self._thread_locked(task_id):
+            messages = self._read_thread(path)
+            message = next((item for item in messages if item.id == message_id), None)
+            if message is None:
+                return None
+            stamp = now_iso()
+            accepted["updated_at"] = stamp
+            self._append_thread_event(
+                path,
+                {"event": "update", "message_id": message_id, "changes": accepted},
+            )
+            for key, value in accepted.items():
+                setattr(message, key, value)
+            return message
+
+    def recover_processing_messages(self) -> int:
+        """Return interrupted message claims to pending after runner startup."""
+        recovered = 0
+        try:
+            paths = sorted(self.threads_dir.glob("task-*.jsonl"))
+        except OSError:
+            return 0
+        for path in paths:
+            try:
+                task_id = int(path.stem.removeprefix("task-"))
+            except ValueError:
+                continue
+            with self._thread_locked(task_id):
+                messages = self._read_thread(path)
+                processing = [item for item in messages if item.status == "processing"]
+                if not processing:
+                    continue
+                stamp = now_iso()
+                for message in processing:
+                    self._append_thread_event(
+                        path,
+                        {
+                            "event": "update",
+                            "message_id": message.id,
+                            "changes": {"status": "pending", "updated_at": stamp},
+                        },
+                    )
+                recovered += len(processing)
+        return recovered
+
+    def message_media_path(self, task_id: int, message_id: int, suffix: str) -> Path:
+        """A collision-free attachment path for one thread message."""
+        directory = self.media_dir / f"task-{task_id:04d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        safe = (
+            suffix
+            if suffix.startswith(".") and suffix[1:].isalnum() and len(suffix) <= 10
+            else ".bin"
+        )
+        return directory / f"message-{message_id:06d}{safe}"
 
     # --- writing ---------------------------------------------------------
 
@@ -281,6 +564,56 @@ class TaskStore:
                 self._write(tasks)
                 return task
             return None
+
+    def save_session(
+        self,
+        task_id: int,
+        role: str | TaskSession,
+        *,
+        backend: str = "",
+        session_id: str = "",
+        context_tokens: int = 0,
+    ) -> TaskSession | None:
+        """Persist a task-scoped backend session under its agent role."""
+        if isinstance(role, TaskSession):
+            session = TaskSession(
+                role=role.role,
+                backend=role.backend,
+                session_id=role.session_id,
+                context_tokens=role.context_tokens,
+                updated_at=now_iso(),
+            )
+        else:
+            session = TaskSession(
+                role=role,
+                backend=backend,
+                session_id=session_id,
+                context_tokens=context_tokens,
+                updated_at=now_iso(),
+            )
+        if not session.role:
+            raise ValueError("a task session requires a role")
+        with self._locked():
+            tasks = self._read()
+            task = next((item for item in tasks if item.id == task_id), None)
+            if task is None:
+                return None
+            task.sessions[session.role] = session
+            task.updated_at = session.updated_at
+            self._write(tasks)
+            return session
+
+    def clear_session(self, task_id: int, role: str) -> bool:
+        """Forget one resumable session without changing the task thread."""
+        with self._locked():
+            tasks = self._read()
+            task = next((item for item in tasks if item.id == task_id), None)
+            if task is None or role not in task.sessions:
+                return False
+            del task.sessions[role]
+            task.updated_at = now_iso()
+            self._write(tasks)
+            return True
 
     def approve(
         self,
@@ -416,6 +749,21 @@ class TaskStore:
             task = next((item for item in tasks if item.id == task_id), None)
             if task is None or task.status not in TERMINAL:
                 return None
+            stamp = now_iso()
+            task.runs.append(
+                TaskRun(
+                    attempt=task.attempts,
+                    status=task.status,
+                    branch=task.branch,
+                    approved_sha=task.approved_sha,
+                    delivery=DeliveryRecord.from_dict(asdict(task.delivery)),
+                    note=task.note,
+                    url=task.url,
+                    cost_usd=task.cost_usd,
+                    started_at=task.claimed_at or task.created_at,
+                    finished_at=task.updated_at or stamp,
+                )
+            )
             if task.branch and task.branch not in task.previous_branches:
                 task.previous_branches.append(task.branch)
             task.branch = None
@@ -428,7 +776,7 @@ class TaskStore:
             task.note = ""
             task.claimed_by = ""
             task.claimed_at = ""
-            task.updated_at = now_iso()
+            task.updated_at = stamp
             self._write(tasks)
             return task
 
@@ -543,11 +891,7 @@ class TaskStore:
                 return 0
             archived_ids = self._archived_ids()
             fresh = sorted(
-                (
-                    item
-                    for item in tasks
-                    if item.id in moving_ids and item.id not in archived_ids
-                ),
+                (item for item in tasks if item.id in moving_ids and item.id not in archived_ids),
                 key=lambda item: item.id,
             )
             if fresh:
@@ -559,9 +903,7 @@ class TaskStore:
                             "archived_at": now_iso(),
                             "task": task.to_dict(),
                         }
-                        handle.write(
-                            json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-                        )
+                        handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
                         handle.write("\n")
                     handle.flush()
                     os.fsync(handle.fileno())
@@ -612,6 +954,82 @@ class TaskStore:
 
     # --- plumbing --------------------------------------------------------
 
+    def _thread_path(self, task_id: int) -> Path:
+        return self.threads_dir / f"task-{task_id:04d}.jsonl"
+
+    @contextmanager
+    def _thread_locked(self, task_id: int) -> Iterator[None]:
+        """Serialize reads and appends for one thread across processes."""
+        self.threads_dir.mkdir(parents=True, exist_ok=True)
+        path = self._thread_path(task_id)
+        with exclusive_file(path.with_name(path.name + ".lock")):
+            yield
+
+    def _read_thread(self, path: Path) -> list[TaskMessage]:
+        """Fold message and update events, ignoring torn/unknown records."""
+        folded: dict[int, TaskMessage] = {}
+        try:
+            handle = path.open(encoding="utf-8")
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            raise QueueCorruptError(f"cannot read task thread {path}: {exc}") from exc
+        with handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                event = record.get("event")
+                if event == "message":
+                    raw = record.get("message")
+                    if not isinstance(raw, dict):
+                        continue
+                    try:
+                        message = TaskMessage.from_dict(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if message.id > 0:
+                        folded[message.id] = message
+                elif event == "update":
+                    try:
+                        message_id = int(record.get("message_id", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    target = folded.get(message_id)
+                    changes = record.get("changes")
+                    if target is None or not isinstance(changes, dict):
+                        continue
+                    mutable = {item.name for item in fields(TaskMessage)} - {
+                        "id",
+                        "created_at",
+                        "idempotency_key",
+                    }
+                    for key, value in changes.items():
+                        if key in mutable:
+                            setattr(target, key, value)
+        return [folded[item_id] for item_id in sorted(folded)]
+
+    def _append_thread_event(self, path: Path, record: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            encoded = (json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n").encode(
+                "utf-8"
+            )
+            with path.open("ab+") as handle:
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() > 0:
+                    handle.seek(-1, os.SEEK_END)
+                    if handle.read(1) != b"\n":
+                        handle.write(b"\n")
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise QueueCorruptError(f"cannot append task thread {path}: {exc}") from exc
+
     @contextmanager
     def _locked(self) -> Iterator[None]:
         """Exclusive across processes for the length of one read-modify-write.
@@ -651,9 +1069,7 @@ class TaskStore:
         try:
             modified = datetime.fromtimestamp(self.path.stat().st_mtime, UTC)
             stamp = modified.strftime("%Y%m%dT%H%M%SZ")
-            backup = self.path.with_name(
-                f"{self.path.stem}.corrupt-{stamp}{self.path.suffix}"
-            )
+            backup = self.path.with_name(f"{self.path.stem}.corrupt-{stamp}{self.path.suffix}")
             if not backup.exists():
                 shutil.copy2(self.path, backup)
         except OSError:
@@ -662,7 +1078,7 @@ class TaskStore:
         return QueueCorruptError(f"queue {self.path} is corrupt: {reason}{preserved}")
 
     def _write(self, tasks: list[Task]) -> None:
-        self._backup_v1()
+        self._backup_legacy()
         payload = {
             "version": SCHEMA_VERSION,
             "updated_at": now_iso(),
@@ -670,15 +1086,16 @@ class TaskStore:
         }
         write_atomic(self.path, json.dumps(payload, ensure_ascii=False, indent=2))
 
-    def _backup_v1(self) -> None:
-        """Keep the original v1 queue once, immediately before migration."""
+    def _backup_legacy(self) -> None:
+        """Keep the original older-schema queue once before migration."""
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return
         version = raw.get("version", 1) if isinstance(raw, dict) else 1
-        backup = self.path.with_name(f"{self.path.stem}.v1.backup{self.path.suffix}")
-        if version == 1 and not backup.exists():
+        version = version if isinstance(version, int) else 1
+        backup = self.path.with_name(f"{self.path.stem}.v{version}.backup{self.path.suffix}")
+        if version < SCHEMA_VERSION and not backup.exists():
             shutil.copy2(self.path, backup)
 
 
@@ -715,6 +1132,9 @@ __all__ = [
     "QueueCorruptError",
     "Status",
     "Task",
+    "TaskMessage",
+    "TaskRun",
+    "TaskSession",
     "TaskStore",
     "now_iso",
     "write_atomic",

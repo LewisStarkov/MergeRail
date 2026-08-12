@@ -3,8 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentq.agent import AgentOptions, ClaudeAgent, context_size, parse_event, tool_hint
-from agentq.prompts import answer_of, fix, fixer_system, review, reviewer_system, verdict_of
-from agentq.tasks import Task
+from agentq.config import ProjectContext
+from agentq.prompts import (
+    REVIEW_SCHEMA,
+    answer_of,
+    fix,
+    fixer_system,
+    follow_up,
+    review,
+    reviewer_system,
+    verdict_of,
+)
+from agentq.tasks import Task, TaskMessage
 
 
 def agent(**options: object) -> ClaudeAgent:
@@ -104,11 +114,37 @@ def test_the_rules_live_in_the_system_prompts() -> None:
     assert "CLAUDE.md" in rules
     assert "Do not push" in rules
     assert "ANSWER:" in rules
+    assert "blocking questions" in rules
 
     plain = reviewer_system([], structured=False)
     assert "VERDICT: APPROVE" in plain
     structured = reviewer_system([], structured=True)
     assert "structured output" in structured
+
+
+def test_review_schema_is_valid_for_strict_structured_outputs() -> None:
+    properties = REVIEW_SCHEMA["properties"]
+    assert REVIEW_SCHEMA["additionalProperties"] is False
+    assert set(REVIEW_SCHEMA["required"]) == set(properties)
+
+
+def test_operator_context_reaches_both_agents() -> None:
+    context = ProjectContext(
+        environment="production",
+        work_mode="incident",
+        summary="restore payment processing",
+        external_actions="ask",
+        constraints=["preserve audit logs"],
+    )
+
+    fixer = fixer_system([], context)
+    reviewer = reviewer_system([], structured=False, project=context)
+    for prompt in (fixer, reviewer):
+        assert "environment: production" in prompt
+        assert "work mode: incident" in prompt
+        assert "restore payment processing" in prompt
+        assert "preserve audit logs" in prompt
+        assert "stop and ask" in prompt
 
 
 def test_the_task_prompts_carry_only_the_task() -> None:
@@ -123,6 +159,23 @@ def test_the_task_prompts_carry_only_the_task() -> None:
     huge = review(task, "agentq/1", "main", "ruff: PASS", "x" * 9000, "one.txt | 2 +-")
     assert "x" * 100 not in huge  # long ones are read in the worktree instead
     assert "one.txt" in huge
+
+
+def test_task_prompts_carry_the_durable_discussion() -> None:
+    task = Task(id=1, text="fix it")
+    messages = [
+        TaskMessage(id=1, text="keep the old API", author="lama"),
+        TaskMessage(id=2, text="see this", file="/tmp/shot.png"),
+    ]
+
+    initial = fix(task, "agentq/1", "main", "", messages)
+    continued = follow_up(messages[-1:])
+
+    assert "keep the old API" in initial
+    assert "lama" in initial
+    assert "/tmp/shot.png" in initial
+    assert "latest requirements" in continued
+    assert "see this" in continued
 
 
 def test_the_answer_marker_is_the_way_out_of_committing() -> None:

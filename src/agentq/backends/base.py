@@ -50,6 +50,7 @@ class SessionSpec:
     timeout: int = 3600
     context_limit: int = 160_000
     settings: Mapping[str, object] = field(default_factory=dict)
+    resume_session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,9 +134,7 @@ class AgentBackend(Protocol):
 
     def probe(self) -> BackendInfo: ...
 
-    def open_session(
-        self, spec: SessionSpec, events: EventSink | None = None
-    ) -> AgentSession: ...
+    def open_session(self, spec: SessionSpec, events: EventSink | None = None) -> AgentSession: ...
 
 
 __all__ = [

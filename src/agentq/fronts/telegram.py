@@ -27,8 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from .. import log
-from ..tasks import Status, Task, TaskStore, write_atomic
-from .base import Front
+from ..tasks import TERMINAL, Status, Task, TaskMessage, TaskStore, write_atomic
+from .base import Front, StreamEvent
 
 API = "https://api.telegram.org"
 
@@ -41,14 +41,19 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 #: Rows before the list is cut short. Telegram takes 4096 characters.
 MAX_ROWS = 20
 ROW_CHARS = 80
+RECENT_MESSAGES = 3
 
 HELP = (
     "<b>agentq</b>\n\n"
     "Send me anything — that is a task. A screenshot works too.\n\n"
     "/list — the queue\n"
     "/show &lt;id&gt; — one task in full\n"
+    "/message &lt;id&gt; &lt;text&gt; — send a follow-up to the agent\n"
+    "/comment &lt;id&gt; &lt;text&gt; — add a note without running the agent\n"
     "/retry_task &lt;id&gt; — run the agents again\n"
     "/retry_delivery &lt;id&gt; — retry only merge or PR\n"
+    "/init — configure agents and current project context\n"
+    "/cancel — cancel the setup dialog\n"
     "/done &lt;id&gt; — close it by hand\n"
     "/drop &lt;id&gt; — delete it"
 )
@@ -71,9 +76,7 @@ class TelegramFront(Front):
 
     name = "telegram"
 
-    def __init__(
-        self, store: TaskStore, token: str, admins: set[int], state_dir: Path
-    ) -> None:
+    def __init__(self, store: TaskStore, token: str, admins: set[int], state_dir: Path) -> None:
         super().__init__(store)
         self.token = token
         self.admins = set(admins)
@@ -81,6 +84,9 @@ class TelegramFront(Front):
         self.offset = 0
         self.stopping = False
         self.thread: threading.Thread | None = None
+        self._setups: dict[int, dict[str, Any]] = {}
+        self._live_lock = threading.Lock()
+        self._live: dict[int, dict[str, Any]] = {}
 
     # --- lifecycle -------------------------------------------------------
 
@@ -121,10 +127,23 @@ class TelegramFront(Front):
             return None
         return body.get("result") if isinstance(body, dict) else None
 
-    def send(self, chat_id: int | str, text: str) -> None:
-        self.api(
+    def send(self, chat_id: int | str, text: str) -> int | None:
+        sent = self.api(
             "sendMessage",
             chat_id=chat_id,
+            text=text[:4000],
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        if isinstance(sent, dict) and str(sent.get("message_id", "")).isdigit():
+            return int(sent["message_id"])
+        return None
+
+    def edit(self, chat_id: int | str, message_id: int, text: str) -> None:
+        self.api(
+            "editMessageText",
+            chat_id=chat_id,
+            message_id=message_id,
             text=text[:4000],
             parse_mode="HTML",
             disable_web_page_preview=True,
@@ -167,7 +186,16 @@ class TelegramFront(Front):
 
         if not self._authorised(user_id, chat_id, text):
             return
-        if text.startswith("/") and self._command(chat_id, text):
+        if text and text.split(maxsplit=1)[0].split("@")[0].lower() == "/cancel":
+            if self._setups.pop(chat_id, None) is not None:
+                self.send(chat_id, "Setup cancelled.")
+            else:
+                self.send(chat_id, "Nothing to cancel.")
+            return
+        if chat_id in self._setups and not text.startswith("/init"):
+            self._setup_answer(chat_id, text)
+            return
+        if text.startswith("/") and self._command(chat_id, text, sender):
             return
         if not text and not self._attachment(message):
             return
@@ -188,7 +216,7 @@ class TelegramFront(Front):
 
     # --- commands --------------------------------------------------------
 
-    def _command(self, chat_id: int, text: str) -> bool:
+    def _command(self, chat_id: int, text: str, sender: dict[str, Any] | None = None) -> bool:
         """``True`` if this was a command and has been answered."""
         parts = text.split()
         verb = parts[0].lstrip("/").split("@")[0].lower()
@@ -197,18 +225,28 @@ class TelegramFront(Front):
         if verb in ("start", "help"):
             self.send(chat_id, HELP)
             return True
+        if verb == "init":
+            self._start_setup(chat_id)
+            return True
         if verb in ("list", "tasks", "queue"):
             self.send(chat_id, self._render_list())
             return True
-        if verb in (
-            "show",
-            "done",
-            "close",
-            "drop",
-            "retry",
-            "retry_task",
-            "retry_delivery",
-        ) and argument.isdigit():
+        if verb in ("message", "comment"):
+            self._thread_message(chat_id, verb, text, sender or {})
+            return True
+        if (
+            verb
+            in (
+                "show",
+                "done",
+                "close",
+                "drop",
+                "retry",
+                "retry_task",
+                "retry_delivery",
+            )
+            and argument.isdigit()
+        ):
             self._act(chat_id, verb, int(argument))
             return True
         # ``/todo fix the header`` — the verb is noise, the rest is the task.
@@ -216,6 +254,139 @@ class TelegramFront(Front):
             return False
         self.send(chat_id, HELP)
         return True
+
+    def _thread_message(
+        self, chat_id: int, verb: str, command: str, sender: dict[str, Any]
+    ) -> None:
+        parts = command.split(maxsplit=2)
+        usage = f"Usage: /{verb} &lt;id&gt; &lt;text&gt;"
+        if len(parts) < 2 or not parts[1].isdigit():
+            self.send(chat_id, usage)
+            return
+        task_id = int(parts[1])
+        body = parts[2].strip() if len(parts) > 2 else ""
+        if not body:
+            self.send(chat_id, f"Write some text.\n{usage}")
+            return
+        task = self.store.get(task_id)
+        if task is None:
+            self.send(chat_id, f"No task #{task_id}.")
+            return
+        mode = "instruction" if verb == "message" else "comment"
+        saved = self.store.append_message(
+            task_id,
+            body,
+            role="user",
+            mode=mode,
+            author=self._telegram_author(sender),
+        )
+        if saved is None:
+            self.send(chat_id, f"No task #{task_id}.")
+            return
+        if mode == "comment":
+            self.send(chat_id, f"💬 Comment stored on <b>#{task_id}</b>.")
+            return
+        reopened = task.status in TERMINAL and self.store.retry_task(task_id) is not None
+        suffix = " Task reopened." if reopened else ""
+        self.send(chat_id, f"🕓 Message queued for <b>#{task_id}</b>.{suffix}")
+
+    @staticmethod
+    def _telegram_author(sender: dict[str, Any]) -> str:
+        username = str(sender.get("username") or "").strip().lstrip("@")
+        if username:
+            return f"telegram:@{username}"
+        name = str(sender.get("first_name") or "").strip()
+        if name:
+            return f"telegram:{name}"
+        user_id = str(sender.get("id") or "").strip()
+        return f"telegram:user-{user_id}" if user_id else "telegram"
+
+    # --- project setup ---------------------------------------------------
+
+    def _start_setup(self, chat_id: int) -> None:
+        controller = self.setup_controller
+        if controller is None:
+            self.send(chat_id, "Setup is not available until the runner is attached.")
+            return
+        snapshot = controller.setup_snapshot()
+        names = [
+            name
+            for name, info in snapshot.get("agents", {}).items()
+            if isinstance(info, dict) and info.get("available")
+        ]
+        self._setups[chat_id] = {
+            "step": 0,
+            "answers": {},
+            "agents": names,
+        }
+        choices = ", ".join(["auto", *names])
+        self.send(
+            chat_id,
+            f"<b>Project setup · 1/4</b>\nAgent ({escape(choices)}):",
+        )
+
+    def _setup_answer(self, chat_id: int, text: str) -> None:
+        state = self._setups[chat_id]
+        step = int(state["step"])
+        answers = state["answers"]
+        agents = {"auto", *state["agents"]}
+        value = text.strip()
+        if step == 0:
+            if value not in agents:
+                self.send(chat_id, "Choose: " + escape(", ".join(sorted(agents))))
+                return
+            answers["agent"] = value
+        elif step == 1:
+            if value not in {"local", "staging", "production"}:
+                self.send(chat_id, "Choose: local, staging, or production.")
+                return
+            answers["environment"] = value
+        elif step == 2:
+            answers["summary"] = "" if value == "-" else value
+        else:
+            if value not in {"forbid", "ask"}:
+                self.send(chat_id, "Choose: forbid or ask.")
+                return
+            answers["external_actions"] = value
+        step += 1
+        state["step"] = step
+        if step >= 4:
+            self._setups.pop(chat_id, None)
+            self._apply_setup(chat_id, answers)
+            return
+        questions = (
+            "Environment — local, staging, or production:",
+            "What are we working on now? Send <code>-</code> for empty:",
+            "External actions — forbid or ask:",
+        )
+        self.send(chat_id, f"<b>Project setup · {step + 1}/4</b>\n{questions[step - 1]}")
+
+    def _apply_setup(self, chat_id: int, answers: dict[str, object]) -> None:
+        controller = self.setup_controller
+        if controller is None:
+            return
+        status_message: int | None = None
+
+        def progress(stage: str, message: str) -> None:
+            nonlocal status_message
+            body = f"⚙️ <b>Setup · {escape(stage)}</b>\n{escape(message)}"
+            if status_message is None:
+                status_message = self.send(chat_id, body)
+            else:
+                self.edit(chat_id, status_message, body)
+
+        status, response = controller.apply_setup(answers, progress)
+        if status >= 400:
+            reason = escape(str(response.get("error") or "unknown error"))
+            body = f"❌ <b>Setup failed</b>\n{reason}"
+        else:
+            body = (
+                "✅ <b>Setup complete</b>\nThe next task uses the new agents and project context."
+            )
+        if status_message is None:
+            self.send(chat_id, body)
+        else:
+            self.edit(chat_id, status_message, body)
 
     def _act(self, chat_id: int, verb: str, task_id: int) -> None:
         task = self.store.get(task_id)
@@ -328,6 +499,54 @@ class TelegramFront(Front):
             body += f"\n💸 ${task.cost_usd:.2f}"
         for chat_id in self._recipients(task):
             self.send(chat_id, body)
+        if event in {"done", "failed", "blocked", "cancelled"}:
+            with self._live_lock:
+                self._live.pop(task.id, None)
+
+    def stream(self, task: Task, event: StreamEvent) -> None:
+        """Keep one live status message per recipient, updated in place."""
+        with self._live_lock:
+            if event.kind == "reset":
+                self._live.pop(task.id, None)
+            state = self._live.setdefault(
+                task.id,
+                {"stage": "", "roles": {}, "messages": {}},
+            )
+            if event.role == "runner" and event.kind == "status":
+                state["stage"] = event.text
+            elif event.role != "runner":
+                role = state["roles"].setdefault(event.role, {"status": "", "text": ""})
+                if event.kind == "status":
+                    role["status"] = event.text
+                elif event.kind == "text":
+                    current = str(role["text"])
+                    role["text"] = (
+                        event.text if event.text.startswith(current) else current + event.text
+                    )[-1200:]
+                elif event.kind in {"result", "error"}:
+                    role["status"] = "complete" if event.kind == "result" else "failed"
+                    role["text"] = event.text[-1200:]
+            if event.kind == "text":
+                return
+            body = self._render_live(task, state)
+            messages = state["messages"]
+            for chat_id in self._recipients(task):
+                message_id = messages.get(chat_id)
+                if message_id is None:
+                    sent = self.send(chat_id, body)
+                    if sent is not None:
+                        messages[chat_id] = sent
+                else:
+                    self.edit(chat_id, message_id, body)
+
+    @staticmethod
+    def _render_live(task: Task, state: dict[str, Any]) -> str:
+        lines = [f"⚙️ <b>#{task.id} live</b> · {escape(str(state.get('stage') or 'working'))}"]
+        for name, role in state["roles"].items():
+            lines.append(f"\n<b>{escape(name)}</b> · {escape(str(role['status'] or 'live'))}")
+            if role["text"]:
+                lines.append(f"<pre>{escape(log.clip(str(role['text']), 1200))}</pre>")
+        return "\n".join(lines)
 
     def _recipients(self, task: Task) -> list[int]:
         """Whoever asked, or every admin when the task came from elsewhere."""
@@ -356,20 +575,55 @@ class TelegramFront(Front):
         return "\n".join(lines)
 
     def _render_card(self, task: Task) -> str:
-        lines = [f"{task.icon} <b>#{task.id}</b> — {escape(task.status)}", escape(task.text) or "—"]
+        lines = [
+            f"{task.icon} <b>#{task.id}</b> — {escape(task.status)}",
+            self._escaped_clip(task.text, 700) or "—",
+        ]
         if task.file:
-            lines.append(f"📎 <code>{escape(task.file)}</code>")
+            lines.append(f"📎 <code>{self._escaped_clip(task.file, 220)}</code>")
         if task.branch:
-            lines.append(f"🌿 <code>{escape(task.branch)}</code>")
+            lines.append(f"🌿 <code>{self._escaped_clip(task.branch, 180)}</code>")
         if task.attempts:
             lines.append(f"attempts: {task.attempts}")
         if task.cost_usd:
             lines.append(f"💸 ${task.cost_usd:.2f}")
         if task.url:
-            lines.append(task.url)
+            lines.append(self._escaped_clip(task.url, 250))
         if task.note:
-            lines.append(f"<i>{escape(log.clip(task.note, 900))}</i>")
+            lines.append(f"<i>{self._escaped_clip(task.note, 450)}</i>")
+        messages = self.store.messages(task.id, limit=2**31 - 1)
+        pending = sum(message.status == "pending" for message in messages)
+        lines.append(f"\n<b>Thread</b> — {len(messages)} messages · {pending} pending")
+        for message in messages[-RECENT_MESSAGES:]:
+            lines.extend(self._render_thread_message(message))
         return "\n".join(lines)
+
+    @classmethod
+    def _render_thread_message(cls, message: TaskMessage) -> list[str]:
+        author = message.author or message.role
+        detail = message.mode
+        if message.status not in {"stored", "answered"}:
+            detail += f" · {message.status}"
+        icon = "🤖" if message.role == "assistant" else "💬"
+        return [
+            f"{icon} <b>{cls._escaped_clip(author, 90)}</b> · {escape(detail)}",
+            cls._escaped_clip(message.text, 350) or "—",
+        ]
+
+    @staticmethod
+    def _escaped_clip(value: object, limit: int) -> str:
+        """Escape user text while keeping the rendered Telegram HTML valid."""
+        text = str(value)
+        escaped: list[str] = []
+        used = 0
+        for character in text:
+            encoded = escape(character)
+            if used + len(encoded) > limit - 1:
+                escaped.append("…")
+                break
+            escaped.append(encoded)
+            used += len(encoded)
+        return "".join(escaped)
 
     # --- state -----------------------------------------------------------
 
@@ -390,4 +644,12 @@ class TelegramFront(Front):
         write_atomic(self.state_path, json.dumps(payload))
 
 
-__all__ = ["API", "HELP", "MAX_FILE_BYTES", "MAX_ROWS", "POLL_TIMEOUT", "TelegramFront"]
+__all__ = [
+    "API",
+    "HELP",
+    "MAX_FILE_BYTES",
+    "MAX_ROWS",
+    "POLL_TIMEOUT",
+    "RECENT_MESSAGES",
+    "TelegramFront",
+]

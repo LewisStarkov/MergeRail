@@ -80,6 +80,35 @@ def test_opencode_parses_cumulative_text_usage_and_exact_cost(repo: Path, monkey
     assert not reply.is_error
 
 
+def test_opencode_resumes_an_initial_session_without_repeating_the_system_prompt(
+    repo: Path, monkeypatch: Any
+) -> None:
+    commands: list[list[str]] = []
+    events = ({"type": "text", "sessionID": "ses_old", "part": {"text": "continued"}},)
+
+    def fake_run(command: list[str], **kwargs: Any) -> JsonlProcessResult:
+        del kwargs
+        commands.append(command)
+        return JsonlProcessResult(events, "", 0, False, 0.1)
+
+    monkeypatch.setattr(opencode, "run_jsonl", fake_run)
+    session = opencode.OpenCodeBackend(("fake-opencode",)).open_session(
+        SessionSpec(
+            "fixer",
+            repo,
+            system_prompt="standing rules",
+            resume_session_id="ses_old",
+        )
+    )
+
+    reply = session.ask(TurnRequest("continue"))
+
+    assert commands[0][commands[0].index("--session") + 1] == "ses_old"
+    assert commands[0][-1] == "continue"
+    assert "standing rules" not in commands[0]
+    assert reply.session_id == "ses_old"
+
+
 def test_opencode_does_not_mutate_the_process_environment(repo: Path) -> None:
     session = opencode.OpenCodeBackend(("fake-opencode",)).open_session(SessionSpec("fixer", repo))
     before = dict(os.environ)
@@ -102,5 +131,5 @@ def test_opencode_rotates_a_session_at_the_context_limit(repo: Path, monkeypatch
         SessionSpec("fixer", repo, context_limit=20)
     )
     reply = session.ask(TurnRequest("work"))
-    assert reply.session_id == "ses_9"
+    assert reply.session_id is None
     assert session.session_id is None

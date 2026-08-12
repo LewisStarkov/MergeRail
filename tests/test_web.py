@@ -25,6 +25,32 @@ from agentq.fronts.web import (
 from agentq.tasks import Status, TaskStore
 
 
+class SetupStub:
+    def __init__(self) -> None:
+        self.received: dict[str, object] = {}
+
+    def setup_snapshot(self) -> dict[str, Any]:
+        return {
+            "available": True,
+            "initialized": False,
+            "busy": False,
+            "agents": {"codex": {"available": True, "reason": "", "version": "1"}},
+            "values": {
+                "agent": "codex",
+                "environment": "local",
+                "summary": "",
+                "external_actions": "forbid",
+            },
+        }
+
+    def apply_setup(self, payload: Any, progress: Any) -> tuple[int, dict[str, Any]]:
+        self.received = dict(payload)
+        progress("validating", "Checking answers")
+        progress("saving", "Writing agentq.toml")
+        progress("complete", "Ready")
+        return 200, {"ok": True}
+
+
 @pytest.fixture
 def front(tmp_path: Path) -> Iterator[WebFront]:
     served = WebFront(TaskStore(tmp_path / "tasks.json"), port=0)  # 0: any free port
@@ -34,6 +60,12 @@ def front(tmp_path: Path) -> Iterator[WebFront]:
 
 
 def call(front: WebFront, path: str, payload: dict[str, Any] | None = None) -> Any:
+    return call_response(front, path, payload)[1]
+
+
+def call_response(
+    front: WebFront, path: str, payload: dict[str, Any] | None = None
+) -> tuple[int, Any]:
     request = urllib.request.Request(
         f"http://127.0.0.1:{front.port}{path}",
         data=json.dumps(payload).encode("utf-8") if payload is not None else None,
@@ -41,7 +73,7 @@ def call(front: WebFront, path: str, payload: dict[str, Any] | None = None) -> A
         method="POST" if payload is not None else "GET",
     )
     with urllib.request.urlopen(request, timeout=5) as response:
-        return json.loads(response.read().decode("utf-8"))
+        return response.status, json.loads(response.read().decode("utf-8"))
 
 
 def test_the_page_is_served(front: WebFront) -> None:
@@ -50,20 +82,43 @@ def test_the_page_is_served(front: WebFront) -> None:
     assert "agentq" in page
     assert "textContent" in page  # task text must never become markup
     assert 'new EventSource("/api/events")' in page
-    assert 'aria-live' in page
+    assert "aria-live" in page
     assert 'document.createElement("details")' in page
     assert "expandedStreams.has(taskId)" in page
     assert 'class="workbench"' in page
+    assert 'id="sidebar-toggle"' in page
+    assert 'id="sidebar-content"' in page
+    assert 'id="sidebar-new-task"' in page
+    assert 'id="sidebar-project-settings"' in page
+    assert "sidebar-collapsed" in page
+    assert "function setSidebarCollapsed" in page
+    assert "prefers-reduced-motion: reduce" in page
+    assert "el.dataset.status = t.status" in page
+    assert 'el.setAttribute("aria-label", el.title)' in page
+    assert "function sessionStatuses" not in page
     assert 'id="detail"' in page
+    assert "function loadThread" in page
+    assert "Send to agent" in page
+    assert 'dataset.mode = "comment"' in page
     assert 'class="pill' not in page
     assert "bootstrap-icons@1.13.1" in page
-    assert "bi bi-terminal" in page
+    assert "bi bi-terminal" not in page
     assert "statusIcons" in page
     assert "${t.icon}" not in page
     assert "📎" not in page
     assert "--accent: #0f62fe" in page
     assert "data-design" not in page
     assert "designPicker" not in page
+    assert 'id="setup-form"' in page
+    assert 'fetch("/api/setup"' in page
+    assert 'id="setup-agent"' in page
+    assert 'id="setup-environment"' in page
+    assert 'id="setup-summary"' in page
+    assert 'id="setup-external"' in page
+    assert 'id="setup-fixer"' not in page
+    assert 'id="setup-reviewer"' not in page
+    assert 'id="setup-work-mode"' not in page
+    assert 'id="setup-constraints"' not in page
 
 
 def test_a_posted_task_lands_on_the_queue(front: WebFront) -> None:
@@ -75,6 +130,151 @@ def test_a_posted_task_lands_on_the_queue(front: WebFront) -> None:
     assert task["text"] == "fix the header"
     assert task["source"] == "web"
     assert task["open"] is True
+    assert task["message_count"] == 0
+    assert task["pending_message_count"] == 0
+    assert "messages" not in task
+
+
+def test_task_messages_are_paginated_and_stats_stay_in_the_task_list(
+    front: WebFront,
+) -> None:
+    task = front.store.add("original task", source="web")
+    for number in range(3):
+        status, created = call_response(
+            front,
+            f"/api/tasks/{task.id}/messages",
+            {"text": f"comment {number}", "mode": "comment"},
+        )
+        assert status == 201
+        assert created["message"]["status"] == "stored"
+
+    first = call(front, f"/api/tasks/{task.id}/messages?limit=2")
+    assert [message["text"] for message in first["messages"]] == [
+        "comment 0",
+        "comment 1",
+    ]
+    assert first["message_count"] == 3
+    assert first["pending_message_count"] == 0
+
+    second = call(front, f"/api/tasks/{task.id}/messages?after=2&limit=2")
+    assert [message["text"] for message in second["messages"]] == ["comment 2"]
+
+    (listed,) = call(front, "/api/tasks")["tasks"]
+    assert listed["message_count"] == 3
+    assert listed["last_message_at"]
+    assert "messages" not in listed
+
+
+def test_instruction_reopens_a_terminal_task_but_comment_does_not(front: WebFront) -> None:
+    task = front.store.add("ship it", source="web")
+    front.store.update(task.id, status=Status.DONE, note="first run")
+
+    status, _ = call_response(
+        front,
+        f"/api/tasks/{task.id}/messages",
+        {"text": "A note for later", "mode": "comment"},
+    )
+    assert status == 201
+    current = front.store.get(task.id)
+    assert current is not None and current.status == Status.DONE
+
+    status, created = call_response(
+        front,
+        f"/api/tasks/{task.id}/messages",
+        {
+            "text": "Also update the docs",
+            "mode": "instruction",
+            "idempotency_key": "follow-up-1",
+        },
+    )
+    assert status == 202
+    assert created["message"]["status"] == "pending"
+    current = front.store.get(task.id)
+    assert current is not None and current.status == Status.NEW
+    assert current.runs[-1].note == "first run"
+
+    front.store.update(task.id, status=Status.DONE)
+    front.store.update_message(task.id, created["message"]["id"], status="answered")
+    call(
+        front,
+        f"/api/tasks/{task.id}/messages",
+        {
+            "text": "Also update the docs",
+            "mode": "instruction",
+            "idempotency_key": "follow-up-1",
+        },
+    )
+    current = front.store.get(task.id)
+    assert current is not None and current.status == Status.DONE
+    assert len(front.store.messages(task.id)) == 2
+
+
+def test_message_attachments_are_unique(front: WebFront) -> None:
+    task = front.store.add("compare screenshots", source="web")
+    paths = []
+    for content in (b"first", b"second"):
+        _, created = call_response(
+            front,
+            f"/api/tasks/{task.id}/messages",
+            {
+                "text": "screenshot",
+                "mode": "comment",
+                "file": {
+                    "name": "same.png",
+                    "data": base64.b64encode(content).decode("ascii"),
+                },
+            },
+        )
+        paths.append(Path(created["message"]["file"]))
+
+    assert paths[0] != paths[1]
+    assert [path.read_bytes() for path in paths] == [b"first", b"second"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"text": ""},
+        {"text": 42},
+        {"text": "hello", "mode": "run-now"},
+        {"text": "hello", "idempotency_key": 42},
+        {"text": "hello", "file": "not-an-object"},
+        {"text": "hello", "file": {"name": "x.png", "data": "bad base64"}},
+    ],
+)
+def test_invalid_task_messages_are_refused(front: WebFront, payload: dict[str, Any]) -> None:
+    task = front.store.add("task", source="web")
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        call(front, f"/api/tasks/{task.id}/messages", payload)
+    assert caught.value.code == 400
+    assert front.store.messages(task.id) == []
+
+
+def test_messages_for_a_missing_task_are_404(front: WebFront) -> None:
+    for payload in (None, {"text": "hello", "mode": "comment"}):
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            call(front, "/api/tasks/999/messages", payload)
+        assert caught.value.code == 404
+
+
+def test_setup_is_applied_and_progress_is_in_the_sse_payload(front: WebFront) -> None:
+    setup = SetupStub()
+    front.bind_setup(setup)
+    response = call(
+        front,
+        "/api/setup",
+        {"agent": "codex", "environment": "production", "summary": "ship release"},
+    )
+    assert response == {"ok": True}
+    assert setup.received["environment"] == "production"
+
+    payload = call(front, "/api/tasks")
+    assert payload["setup"]["progress"]["stage"] == "complete"
+    assert [item["stage"] for item in payload["setup"]["progress"]["history"]] == [
+        "validating",
+        "saving",
+        "complete",
+    ]
 
 
 def test_task_payload_is_paginated(tmp_path: Path) -> None:
@@ -206,6 +406,17 @@ def test_auth_uses_the_styled_login_and_protects_api_and_sse(tmp_path: Path) -> 
         with pytest.raises(urllib.error.HTTPError) as denied:
             urllib.request.urlopen(root + "/api/tasks", timeout=5)
         assert denied.value.code == 401
+        with pytest.raises(urllib.error.HTTPError) as denied_thread:
+            urllib.request.urlopen(root + "/api/tasks/1/messages", timeout=5)
+        assert denied_thread.value.code == 401
+        message_request = urllib.request.Request(
+            root + "/api/tasks/1/messages",
+            data=json.dumps({"text": "secret", "mode": "comment"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as denied_message:
+            urllib.request.urlopen(message_request, timeout=5)
+        assert denied_message.value.code == 401
 
         wrong = urllib.request.Request(
             root + "/login",
@@ -244,9 +455,7 @@ def test_nonlocal_web_requires_authentication_or_explicit_unsafe(tmp_path: Path)
     with pytest.raises(SystemExit, match="refusing to expose"):
         refused.start()
 
-    authenticated = WebFront(
-        TaskStore(tmp_path / "authenticated.json"), host="0.0.0.0", port=0
-    )
+    authenticated = WebFront(TaskStore(tmp_path / "authenticated.json"), host="0.0.0.0", port=0)
     authenticated.enable_auth("agentq", "secret")
     authenticated.start()
     authenticated.stop()

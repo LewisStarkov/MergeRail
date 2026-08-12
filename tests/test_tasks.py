@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import json
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -12,12 +13,20 @@ from agentq.tasks import (
     QueueCorruptError,
     Status,
     Task,
+    TaskSession,
     TaskStore,
 )
 
 
 def store_at(tmp_path: Path) -> TaskStore:
     return TaskStore(tmp_path / "tasks.json")
+
+
+def append_message_from_process(args: tuple[str, int, int]) -> int:
+    queue_path, task_id, index = args
+    message = TaskStore(Path(queue_path)).append_message(task_id, f"message {index}")
+    assert message is not None
+    return message.id
 
 
 def test_add_assigns_increasing_ids(tmp_path: Path) -> None:
@@ -247,3 +256,200 @@ def test_concurrent_adds_lose_nothing(tmp_path: Path) -> None:
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda index: store.add(f"task {index}"), range(24)))
     assert sorted(task.id for task in store.load()) == list(range(1, 25))
+
+
+def test_message_defaults_and_idempotency(tmp_path: Path) -> None:
+    store = store_at(tmp_path)
+    task = store.add("one")
+
+    instruction = store.append_message(
+        task.id, " do this ", author="lama", idempotency_key="request-1"
+    )
+    duplicate = store.append_message(task.id, "a duplicate body", idempotency_key="request-1")
+    comment = store.append_message(task.id, "thinking aloud", mode="comment")
+    answer = store.append_message(task.id, "done", role="assistant")
+
+    assert instruction is not None
+    assert instruction.text == "do this"
+    assert instruction.status == "pending"
+    assert duplicate == instruction
+    assert comment is not None and comment.status == "stored"
+    assert answer is not None and answer.status == "stored"
+    assert [message.id for message in store.messages(task.id)] == [1, 2, 3]
+    assert store.append_message(999, "missing") is None
+    assert store.message_stats(task.id) == {
+        "message_count": 3,
+        "pending_message_count": 1,
+        "last_message_at": answer.created_at,
+        "message_revision": (tmp_path / "threads" / "task-0001.jsonl").stat().st_size,
+    }
+
+
+def test_message_journal_folds_status_updates_and_paginates(tmp_path: Path) -> None:
+    store = store_at(tmp_path)
+    task = store.add("one")
+    first = store.append_message(task.id, "first")
+    second = store.append_message(task.id, "second")
+    assert first is not None and second is not None
+
+    updated = store.update_message(task.id, first.id, status="answered", nonsense="ignored")
+    assert updated is not None and updated.status == "answered"
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "threads" / "task-0001.jsonl").read_text().splitlines()
+    ]
+    assert [record["event"] for record in records] == ["message", "message", "update"]
+    assert store.messages(task.id, after=first.id, limit=1) == [second]
+    assert store.messages(task.id, limit=0) == []
+
+
+def test_claim_and_recover_processing_messages(tmp_path: Path) -> None:
+    store = store_at(tmp_path)
+    first_task = store.add("one")
+    second_task = store.add("two")
+    first = store.append_message(first_task.id, "first")
+    comment = store.append_message(first_task.id, "comment", mode="comment")
+    second = store.append_message(second_task.id, "second")
+    assert first is not None and comment is not None and second is not None
+
+    claimed = store.claim_pending_messages(first_task.id)
+    assert [(item.id, item.status) for item in claimed] == [(first.id, "processing")]
+    assert store.claim_pending_messages(first_task.id) == []
+    store.claim_pending_messages(second_task.id)
+
+    assert store.recover_processing_messages() == 2
+    assert store.messages(first_task.id)[0].status == "pending"
+    assert store.messages(first_task.id)[1].status == "stored"
+    assert store.messages(second_task.id)[0].status == "pending"
+
+
+def test_concurrent_process_message_appends_lose_nothing(tmp_path: Path) -> None:
+    store = store_at(tmp_path)
+    task = store.add("one")
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        message_ids = list(
+            pool.map(
+                append_message_from_process,
+                [(str(store.path), task.id, i) for i in range(16)],
+            )
+        )
+    assert sorted(message_ids) == list(range(1, 17))
+    assert [message.id for message in store.messages(task.id)] == list(range(1, 17))
+
+
+def test_message_media_paths_are_unique_and_sanitize_suffixes(tmp_path: Path) -> None:
+    store = store_at(tmp_path)
+    assert store.message_media_path(2, 3, ".png") == (
+        tmp_path / "media" / "task-0002" / "message-000003.png"
+    )
+    assert store.message_media_path(2, 4, "../../oops") == (
+        tmp_path / "media" / "task-0002" / "message-000004.bin"
+    )
+
+
+def test_task_sessions_round_trip_and_can_be_cleared(tmp_path: Path) -> None:
+    store = store_at(tmp_path)
+    task = store.add("one")
+    saved = store.save_session(
+        task.id,
+        "fixer",
+        backend="codex",
+        session_id="thread-123",
+        context_tokens=456,
+    )
+    assert saved is not None and saved.updated_at
+
+    reviewer = TaskSession("reviewer", "claude", "session-456", 100)
+    assert store.save_session(task.id, reviewer) is not None
+    loaded = store.get(task.id)
+    assert loaded is not None
+    assert loaded.sessions["fixer"].session_id == "thread-123"
+    assert loaded.sessions["fixer"].context_tokens == 456
+    assert loaded.sessions["reviewer"].backend == "claude"
+    assert store.clear_session(task.id, "fixer") is True
+    assert store.clear_session(task.id, "fixer") is False
+    loaded = store.get(task.id)
+    assert loaded is not None and set(loaded.sessions) == {"reviewer"}
+
+
+def test_retry_snapshots_terminal_run_and_preserves_thread_and_sessions(
+    tmp_path: Path,
+) -> None:
+    store = store_at(tmp_path)
+    task = store.add("one")
+    claimed = store.take_next()
+    assert claimed is not None
+    store.save_session(task.id, "fixer", backend="codex", session_id="thread-1")
+    message = store.append_message(task.id, "follow up")
+    assert message is not None
+    store.update(
+        task.id,
+        status=Status.DONE,
+        branch="agentq/1/a1",
+        approved_sha="abc123",
+        delivery=DeliveryRecord(status="succeeded", commit="abc123"),
+        note="landed",
+        url="https://example.test/pr/1",
+        cost_usd=1.75,
+    )
+
+    retried = store.retry_task(task.id)
+    assert retried is not None
+    assert len(retried.runs) == 1
+    run = retried.runs[0]
+    assert run.attempt == 1
+    assert run.status == Status.DONE
+    assert run.branch == "agentq/1/a1"
+    assert run.approved_sha == "abc123"
+    assert run.delivery.commit == "abc123"
+    assert run.note == "landed"
+    assert run.url == "https://example.test/pr/1"
+    assert run.cost_usd == 1.75
+    assert run.started_at == claimed.claimed_at
+    assert run.finished_at
+    assert retried.sessions["fixer"].session_id == "thread-1"
+    assert store.messages(task.id) == [message]
+
+    reloaded = store.get(task.id)
+    assert reloaded is not None and reloaded.runs == retried.runs
+
+
+def test_v3_migration_adds_metadata_and_preserves_a_backup(tmp_path: Path) -> None:
+    store = store_at(tmp_path)
+    store.path.write_text(
+        '{"version":3,"tasks":[{"id":8,"text":"old","unknown":"safe"}]}',
+        encoding="utf-8",
+    )
+    old = store.get(8)
+    assert old is not None and old.sessions == {} and old.runs == []
+
+    store.update(8, note="migrated")
+    assert (tmp_path / "tasks.v3.backup.json").exists()
+    payload = json.loads(store.path.read_text(encoding="utf-8"))
+    assert payload["version"] == SCHEMA_VERSION
+    assert payload["tasks"][0]["sessions"] == {}
+    assert payload["tasks"][0]["runs"] == []
+
+
+def test_from_dict_tolerates_list_sessions_and_malformed_metadata() -> None:
+    task = Task.from_dict(
+        {
+            "id": 1,
+            "text": "old",
+            "sessions": [
+                {
+                    "role": "fixer",
+                    "backend": "codex",
+                    "session_id": "abc",
+                    "future": True,
+                },
+                "not-an-object",
+            ],
+            "runs": [
+                {"attempt": 1, "status": "done", "delivery": {"commit": "abc"}},
+                None,
+            ],
+        }
+    )
+    assert task.sessions["fixer"].session_id == "abc"
+    assert task.runs[0].delivery.commit == "abc"

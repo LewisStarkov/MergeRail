@@ -35,6 +35,62 @@ def test_codex_maps_roles_models_effort_and_resume(repo: Path) -> None:
     assert resumed[-3:] == ["resume", "thread-1", "again"]
 
 
+def test_codex_resumes_an_initial_session_without_repeating_the_system_prompt(
+    repo: Path, monkeypatch: Any
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> JsonlProcessResult:
+        del kwargs
+        commands.append(command)
+        return result(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "continued"},
+            },
+            {"type": "turn.completed", "usage": {"input_tokens": 5}},
+        )
+
+    monkeypatch.setattr(codex, "run_jsonl", fake_run)
+    session = codex.CodexBackend(("fake-codex",)).open_session(
+        SessionSpec(
+            "fixer",
+            repo,
+            system_prompt="standing rules",
+            resume_session_id="thread-old",
+        )
+    )
+
+    reply = session.ask(TurnRequest("continue"))
+
+    assert commands[0][-3:] == ["resume", "thread-old", "continue"]
+    assert "standing rules" not in commands[0]
+    assert reply.session_id == "thread-old"
+
+
+def test_codex_rotation_returns_no_resumable_session(repo: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        codex,
+        "run_jsonl",
+        lambda *args, **kwargs: result(
+            {"type": "thread.started", "thread_id": "thread-7"},
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "done"},
+            },
+            {"type": "turn.completed", "usage": {"input_tokens": 20}},
+        ),
+    )
+    session = codex.CodexBackend(("fake-codex",)).open_session(
+        SessionSpec("fixer", repo, context_limit=20)
+    )
+
+    reply = session.ask(TurnRequest("work"))
+
+    assert reply.session_id is None
+    assert session.session_id is None
+
+
 def test_codex_uses_a_temporary_schema_and_normalizes_events(repo: Path, monkeypatch: Any) -> None:
     commands: list[list[str]] = []
 
