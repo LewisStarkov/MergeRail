@@ -277,6 +277,39 @@ def test_baseline_mode_and_strict_security_are_configurable(
     assert Config.load(repo).baseline_mode == "strict"
 
 
+def test_project_context_is_loaded_validated_and_overridden(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "agentq.toml").write_text(
+        "[project]\n"
+        'environment = "staging"\n'
+        'work_mode = "maintenance"\n'
+        'summary = "prepare the release"\n'
+        'external_actions = "ask"\n'
+        'constraints = ["no schema changes"]\n',
+        encoding="utf-8",
+    )
+    config = Config.load(repo)
+    assert config.project.environment == "staging"
+    assert config.project.work_mode == "maintenance"
+    assert config.project.summary == "prepare the release"
+    assert config.project.constraints == ["no schema changes"]
+
+    monkeypatch.setenv("AGENTQ_PROJECT_ENVIRONMENT", "production")
+    monkeypatch.setenv("AGENTQ_PROJECT_WORK_MODE", "incident")
+    overridden = Config.load(repo)
+    assert overridden.project.environment == "production"
+    assert overridden.project.work_mode == "incident"
+
+
+def test_unknown_project_context_value_is_rejected(repo: Path) -> None:
+    (repo / "agentq.toml").write_text(
+        '[project]\nenvironment = "somewhere"\n', encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="unknown project environment"):
+        Config.load(repo)
+
+
 def test_unknown_baseline_mode_is_rejected(repo: Path) -> None:
     (repo / "agentq.toml").write_text('baseline_mode = "guess"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="unknown baseline mode"):
@@ -303,6 +336,11 @@ def test_rendered_config_is_loadable(repo: Path, tmp_path: Path) -> None:
     config.baseline_checks = False
     config.baseline_mode = "compare"
     config.strict_security = True
+    config.project.environment = "production"
+    config.project.work_mode = "maintenance"
+    config.project.summary = 'release "blue" safely'
+    config.project.external_actions = "ask"
+    config.project.constraints = ["preserve data", "no downtime"]
     (repo / "agentq.toml").write_text(render_config(config), encoding="utf-8")
     again = Config.load(repo)
     assert again.base_branch == config.base_branch
@@ -321,3 +359,8 @@ def test_rendered_config_is_loadable(repo: Path, tmp_path: Path) -> None:
     assert again.baseline_checks is False
     assert again.baseline_mode == "compare"
     assert again.strict_security
+    assert again.project.environment == "production"
+    assert again.project.work_mode == "maintenance"
+    assert again.project.summary == 'release "blue" safely'
+    assert again.project.external_actions == "ask"
+    assert again.project.constraints == ["preserve data", "no downtime"]

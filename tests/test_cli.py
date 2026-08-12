@@ -54,9 +54,9 @@ def test_backend_flags_resolve_per_role(repo: Path) -> None:
             "run",
             "--path",
             str(repo),
-            "--backend",
+            "--agent",
             "codex",
-            "--reviewer-backend",
+            "--reviewer-agent",
             "opencode",
             "--model",
             "provider/test",
@@ -234,6 +234,77 @@ def test_init_writes_config_and_ignores_the_state(
     before = (repo / ".gitignore").read_text(encoding="utf-8")
     assert main(["init", "--path", str(repo)]) == 0
     assert (repo / ".gitignore").read_text(encoding="utf-8") == before
+
+
+def test_init_flags_write_agent_and_project_context(repo: Path) -> None:
+    assert (
+        main(
+            [
+                "init",
+                "--path",
+                str(repo),
+                "--agent",
+                "codex",
+                "--environment",
+                "production",
+                "--work-mode",
+                "maintenance",
+                "--project-summary",
+                "release the API",
+                "--external-actions",
+                "ask",
+                "--constraint",
+                "no downtime",
+                "--non-interactive",
+            ]
+        )
+        == 0
+    )
+    config = Config.load(repo)
+    assert config.fixer.backend == "codex"
+    assert config.reviewer.backend == "codex"
+    assert config.project.environment == "production"
+    assert config.project.work_mode == "maintenance"
+    assert config.project.summary == "release the API"
+    assert config.project.external_actions == "ask"
+    assert config.project.constraints == ["no downtime"]
+
+
+def test_interactive_init_asks_for_operating_context(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answers = iter(
+        [
+            "production",
+            "restore payments",
+            "ask",
+        ]
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    assert (
+        main(
+            [
+                "init",
+                "--path",
+                str(repo),
+                "--fixer-agent",
+                "codex",
+                "--reviewer-agent",
+                "claude",
+            ]
+        )
+        == 0
+    )
+    config = Config.load(repo)
+    assert config.fixer.backend == "codex"
+    assert config.reviewer.backend == "claude"
+    assert config.project.environment == "production"
+    assert config.project.work_mode == "development"
+    assert config.project.summary == "restore payments"
+    assert config.project.external_actions == "ask"
+    assert config.project.constraints == []
 
 
 def test_outside_a_repository_it_refuses_plainly(tmp_path: Path) -> None:

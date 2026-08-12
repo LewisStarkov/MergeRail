@@ -72,7 +72,7 @@ class OpenCodeSession:
         self._executable = tuple(command)
         self.spec = spec
         self.events = events
-        self.session_id: str | None = None
+        self.session_id = spec.resume_session_id
         self._controller = ProcessController()
 
     @property
@@ -200,7 +200,6 @@ class OpenCodeSession:
         )
         structured = _structured(text) if wants_structured else None
         context = usage.context_tokens if usage is not None else 0
-        reply_session = self.session_id
         if context >= self.spec.context_limit:
             self.session_id = None
         reply_text = text
@@ -214,7 +213,7 @@ class OpenCodeSession:
             context_tokens=context,
             seconds=result.seconds,
             structured=structured,
-            session_id=reply_session,
+            session_id=self.session_id,
             usage=usage,
         )
 

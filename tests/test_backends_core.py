@@ -68,9 +68,7 @@ def test_default_registry_contains_the_builtin_backends() -> None:
 
 
 def test_claude_maps_neutral_permissions_and_enforces_review_denials(tmp_path: Path) -> None:
-    session = ClaudeSession(
-        SessionSpec("reviewer", tmp_path, read_only=True, permission="review")
-    )
+    session = ClaudeSession(SessionSpec("reviewer", tmp_path, read_only=True, permission="review"))
     command = session._command(TurnRequest("review"))
     assert command[command.index("--permission-mode") + 1] == "acceptEdits"
     assert "Edit" in command[command.index("--disallowed-tools") + 1]
@@ -119,9 +117,7 @@ def test_claude_absorbs_session_usage_cost_and_schema(tmp_path: Path) -> None:
     )
 
 
-def test_claude_streams_events_and_resumes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_claude_streams_events_and_resumes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sink = RecordingSink()
     session = ClaudeSession(SessionSpec("fixer", tmp_path), events=sink)
     seen_commands: list[list[str]] = []
@@ -150,6 +146,38 @@ def test_claude_streams_events_and_resumes(
     ]
 
 
+def test_claude_resumes_an_initial_session_without_repeating_the_system_prompt(
+    tmp_path: Path,
+) -> None:
+    session = ClaudeSession(
+        SessionSpec(
+            "fixer",
+            tmp_path,
+            system_prompt="standing rules",
+            resume_session_id="thread-old",
+        )
+    )
+
+    command = session._command(TurnRequest("continue"))
+
+    assert command[:3] == ["claude", "-p", "continue"]
+    assert command[-2:] == ["--resume", "thread-old"]
+    assert "--append-system-prompt" not in command
+
+
+def test_claude_rotation_returns_no_resumable_session(tmp_path: Path) -> None:
+    session = ClaudeSession(SessionSpec("fixer", tmp_path, context_limit=20))
+
+    reply = session._absorb(
+        {"session_id": "thread-1", "result": "done"},
+        {"input_tokens": 20},
+        0.1,
+    )
+
+    assert reply.session_id is None
+    assert session.session_id is None
+
+
 def test_legacy_claude_agent_api_still_builds_the_same_request(tmp_path: Path) -> None:
     legacy = ClaudeAgent("fixer", tmp_path, AgentOptions(permission="safe"))
     assert legacy.command("hello")[:3] == ["claude", "-p", "hello"]
@@ -160,11 +188,9 @@ def test_legacy_claude_agent_api_still_builds_the_same_request(tmp_path: Path) -
 def test_jsonl_process_ignores_junk_and_reports_timeout(tmp_path: Path) -> None:
     script = (
         "import time; print('junk', flush=True); "
-        "print('{\"type\":\"ready\"}', flush=True); time.sleep(60)"
+        'print(\'{"type":"ready"}\', flush=True); time.sleep(60)'
     )
-    result = run_jsonl(
-        [sys.executable, "-c", script], cwd=tmp_path, timeout=0.2
-    )
+    result = run_jsonl([sys.executable, "-c", script], cwd=tmp_path, timeout=0.2)
     assert result.timed_out
     assert result.events == ({"type": "ready"},)
     assert result.returncode != 0

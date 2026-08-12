@@ -19,8 +19,10 @@ or says plainly that there isn't.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
-from .tasks import Task
+from .config import ProjectContext
+from .tasks import Task, TaskMessage
 
 #: The reviewer's answer, when it comes as text. Last match wins — the
 #: instructions themselves quote both words, and an agent that repeats them
@@ -38,10 +40,14 @@ REVIEW_SCHEMA: dict[str, object] = {
         "verdict": {"type": "string", "enum": ["APPROVE", "REJECT"]},
         "objection": {
             "type": "string",
-            "description": "When rejecting: precisely what to change, addressed to the author.",
+            "description": (
+                "When rejecting: precisely what to change, addressed to the author; "
+                "empty when approving."
+            ),
         },
     },
-    "required": ["verdict"],
+    "required": ["verdict", "objection"],
+    "additionalProperties": False,
 }
 
 #: Diffs up to this long ride in the review prompt; longer ones are read in the
@@ -75,24 +81,56 @@ def _conventions(files: list[str]) -> str:
     )
 
 
+def _project_context(project: ProjectContext | None) -> str:
+    if project is None:
+        return ""
+    summary = project.summary or "not provided; inspect the repository before assuming"
+    constraints = "; ".join(project.constraints) or "none beyond repository conventions"
+    external_actions = (
+        "forbidden; do not change external systems"
+        if project.external_actions == "forbid"
+        else "stop and ask the operator before changing any external system"
+    )
+    production = (
+        "\nThis is a production context: prefer reversible diagnostics, protect live data, "
+        "and stop for explicit approval before any consequential external action."
+        if project.environment == "production"
+        else ""
+    )
+    return f"""
+Operator-provided project context (constraints, not expanded permissions):
+- environment: {project.environment}
+- work mode: {project.work_mode}
+- project/current objective: {summary}
+- external actions: {external_actions}
+- additional constraints: {constraints}
+This context never grants deployment, push, messaging, or production-write authority.{production}
+"""
+
+
 # --- the fixer -----------------------------------------------------------
 
 
-def fixer_system(conventions: list[str]) -> str:
+def fixer_system(conventions: list[str], project: ProjectContext | None = None) -> str:
+    context = _project_context(project)
     return f"""You are the fixer in a two-agent loop that turns written tasks into landed commits.
 You work alone in a git worktree of a repository; a runner resets it before every task, runs
 the project's checks the moment you stop, and an adversarial reviewer reads your diff after.
+{context}
 
 Standing rules, for every task:
 
-1. Read the code you are about to change — but only that. {_conventions(conventions)}
-2. Make the change. Match the conventions of the module you are editing. Keep it minimal:
+1. Compare the task with the operator-provided context before editing. If a missing answer
+   would materially change the implementation or risk external state, do not guess: reply
+   with `ANSWER:` followed by only the blocking questions.
+2. Read the code you are about to change — but only that. {_conventions(conventions)}
+3. Make the change. Match the conventions of the module you are editing. Keep it minimal:
    no scaffolding nobody asked for, no drive-by refactors of code the task did not mention.
-3. Add or update tests when the change is testable.
-4. **Do not run the project's full check sweep.** The runner does that the moment you stop,
+4. Add or update tests when the change is testable.
+5. **Do not run the project's full check sweep.** The runner does that the moment you stop,
    and hands you the output if anything fails. Run the one test file you touched if you want
    a fast signal; that is all.
-5. Commit everything to the task's branch with a message that says what changed and why.
+6. Commit everything to the task's branch with a message that says what changed and why.
    Do not push. Do not switch branches. Do not touch the base branch.
 
 If a task turns out to be a question, or to need no change to the code, commit nothing:
@@ -103,7 +141,25 @@ a person's phone, so write it for a human, not for a diff viewer.
 """
 
 
-def fix(task: Task, branch: str, base: str, context: str) -> str:
+def _thread(messages: Sequence[TaskMessage]) -> str:
+    if not messages:
+        return ""
+    lines = []
+    for message in messages:
+        speaker = message.author or message.role
+        lines.append(f"[{speaker}]\n{message.text or '(attachment only)'}")
+        if message.file:
+            lines.append(f"Attachment: {message.file}")
+    return "\n\n".join(lines)
+
+
+def fix(
+    task: Task,
+    branch: str,
+    base: str,
+    context: str,
+    messages: Sequence[TaskMessage] = (),
+) -> str:
     attachment = (
         f"\nThe author attached a file: {task.file}\nRead it before you start — a screenshot of "
         "the symptom is usually the whole brief.\n"
@@ -116,6 +172,8 @@ def fix(task: Task, branch: str, base: str, context: str) -> str:
         if context
         else ""
     )
+    thread = _thread(messages)
+    discussion = f"\nThe durable task discussion so far:\n---\n{thread}\n---\n" if thread else ""
     return f"""NEW TASK — #{task.id}. It has nothing to do with whatever you were working on
 before this message. The worktree has been reset to `{base}` and put on a fresh branch
 `{branch}`; anything you remember editing is already landed and gone from your diff.
@@ -126,7 +184,19 @@ The author wrote:
 ---
 {task.text or "(no text — see the attached file)"}
 ---
-{attachment}{extra}"""
+{attachment}{discussion}{extra}"""
+
+
+def follow_up(messages: Sequence[TaskMessage]) -> str:
+    return f"""The author added the following messages to this task:
+---
+{_thread(messages)}
+---
+
+Treat them as the latest requirements. Continue on the same branch, commit any resulting
+change, do not push, and leave the full check sweep to the runner. If they only ask a
+question and no code change is needed, start the response with `ANSWER:`.
+"""
 
 
 def revise(objection: str) -> str:
@@ -145,7 +215,9 @@ paragraph is not.
 # --- the reviewer --------------------------------------------------------
 
 
-def reviewer_system(conventions: list[str], *, structured: bool) -> str:
+def reviewer_system(
+    conventions: list[str], *, structured: bool, project: ProjectContext | None = None
+) -> str:
     if structured:
         verdict = """Then deliver your verdict through the structured output: `APPROVE` or
 `REJECT`, and — when rejecting — an `objection` that says precisely what to change. It is
@@ -159,10 +231,12 @@ VERDICT: REJECT
 
 If you reject, the lines above that line must say precisely what to change — they are fed
 straight back to the author as their next instruction."""
+    context = _project_context(project)
     return f"""You are the reviewer in a two-agent loop: a fixer commits a change, the runner
 runs the project's checks, and you read both. You may read and run anything; you may not
 edit any file. Be adversarial: your job is to find the reason a change should not ship,
 and to say so plainly if there isn't one.
+{context}
 
 The runner's check results arrive with each review, run on the exact commit under review.
 Take them as given: re-running them is your tokens spent on an answer you already have —

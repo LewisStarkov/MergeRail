@@ -10,6 +10,11 @@ The built-in registry contains `claude`, `codex`, and `opencode`. A role set to 
 uses the first available entry in `agents.backend_order`; once a project has chosen a
 backend, setting it explicitly keeps later runs predictable.
 
+The CLI accepts either backend-oriented or user-facing names. `--agent codex`
+is an alias for `--backend codex`; `--fixer-agent` and `--reviewer-agent` map to
+their corresponding backend flags. `agentq init` asks for these selections and
+persists them, while `run` and `once` flags override the file for one process.
+
 ```toml
 [agents]
 backend_order = ["claude", "codex", "opencode"]
@@ -73,8 +78,10 @@ with an external backend.
 With `strict_security = true` (or `agentq run --strict-security`), preflight requires
 native push denial for both roles and native read-only enforcement for the reviewer.
 This deliberately rejects a backend whose probe cannot establish those guarantees.
-Sessions that declare `conversations = false` are closed after each task instead of
-being reused for later work.
+Agent sessions belong to one task. The runner closes in-memory handles at task
+boundaries; when `native_resume` is available, it persists the provider session id and
+restores it only for that same task. Otherwise, the durable task journal reconstructs
+the discussion context. Session ids are never shared between tasks.
 
 ## Trusted external driver protocol
 

@@ -42,6 +42,7 @@ def reply(
     cost: float | None = 0.0,
     error: bool = False,
     structured: dict[str, Any] | None = None,
+    session_id: str | None = None,
 ) -> AgentReply:
     return AgentReply(
         text=text,
@@ -50,6 +51,7 @@ def reply(
         context_tokens=0,
         seconds=0.0,
         structured=structured,
+        session_id=session_id,
     )
 
 
@@ -66,10 +68,15 @@ class FakeAgent:
         self.prompts: list[str] = []
         self.events: EventSink | None = None
         self.cancelled = threading.Event()
+        self.native_resume = False
 
     @property
     def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(structured_output=True)
+        return BackendCapabilities(
+            conversations=True,
+            native_resume=self.native_resume,
+            structured_output=True,
+        )
 
     def ask(self, request: TurnRequest) -> AgentReply:
         self.prompts.append(request.prompt)
@@ -90,6 +97,7 @@ class FakeBackend:
 
     def __init__(self, agents: dict[str, FakeAgent]) -> None:
         self.agents = agents
+        self.specs: list[SessionSpec] = []
 
     def probe(self) -> BackendInfo:
         return BackendInfo(
@@ -100,6 +108,7 @@ class FakeBackend:
 
     def open_session(self, spec: SessionSpec, events: EventSink | None = None) -> FakeAgent:
         assert spec.cwd.exists()
+        self.specs.append(spec)
         agent = self.agents[spec.role]
         agent.events = events
         return agent
@@ -169,9 +178,7 @@ def worked(runner: Runner, text: str) -> Task:
 # --- the happy path ------------------------------------------------------
 
 
-def test_fixed_reviewed_and_merged(
-    repo: Path, rig: tuple[Runner, FakeAgent, FakeAgent]
-) -> None:
+def test_fixed_reviewed_and_merged(repo: Path, rig: tuple[Runner, FakeAgent, FakeAgent]) -> None:
     runner, fixer, reviewer = rig
     fixer.turns = [committing(runner, "one.txt")]
     reviewer.turns = [says(APPROVE)]
@@ -181,12 +188,9 @@ def test_fixed_reviewed_and_merged(
     assert (repo / "one.txt").exists()  # merged into the base checkout
     assert "committed it" in final.note
     assert isinstance(runner.front, RecordingFront)
+    assert any(event.role == "fixer" and event.kind == "text" for _, event in runner.front.streamed)
     assert any(
-        event.role == "fixer" and event.kind == "text" for _, event in runner.front.streamed
-    )
-    assert any(
-        event.role == "reviewer" and event.kind == "result"
-        for _, event in runner.front.streamed
+        event.role == "reviewer" and event.kind == "result" for _, event in runner.front.streamed
     )
     assert {event["event"] for event in runner.audit.read(task=final.id)} >= {
         "task.started",
@@ -194,6 +198,125 @@ def test_fixed_reviewed_and_merged(
         "review.completed",
         "task.finished",
     }
+
+
+def test_pending_task_messages_reach_the_fixer_and_are_answered(
+    rig: tuple[Runner, FakeAgent, FakeAgent],
+) -> None:
+    runner, fixer, _reviewer = rig
+    task = runner.store.add("why is it broken?")
+    message = runner.store.append_message(task.id, "also check the timeout")
+    assert message is not None
+    fixer.turns = [says("ANSWER: the timeout is too short", session_id="thread-1")]
+
+    claimed = runner.store.take_next()
+    assert claimed is not None
+    runner.handle(claimed)
+
+    final = runner.store.get(task.id)
+    thread = runner.store.messages(task.id)
+    assert final is not None and final.status == Status.DONE
+    assert "also check the timeout" in fixer.prompts[0]
+    assert thread[0].status == "answered"
+    assert thread[-1].role == "assistant"
+    assert final.sessions["fixer"].session_id == "thread-1"
+
+
+def test_follow_up_reuses_the_task_session_and_durable_thread(
+    rig: tuple[Runner, FakeAgent, FakeAgent],
+) -> None:
+    runner, fixer, _reviewer = rig
+    fixer.turns = [says("ANSWER: first answer", session_id="thread-1")]
+    first = worked(runner, "explain it")
+    runner._close_agent_sessions()
+    message = runner.store.append_message(first.id, "and what about retries?")
+    assert message is not None
+    assert runner.store.retry_task(first.id) is not None
+    fixer.turns = [says("ANSWER: retries are bounded", session_id="thread-1")]
+
+    claimed = runner.store.take_next()
+    assert claimed is not None
+    runner.handle(claimed)
+
+    final = runner.store.get(first.id)
+    backend = runner.backends.get("fake")
+    assert isinstance(backend, FakeBackend)
+    assert final is not None and len(final.runs) == 1
+    assert "first answer" in fixer.prompts[-1]
+    assert "what about retries" in fixer.prompts[-1]
+    fixer_specs = [spec for spec in backend.specs if spec.role == "fixer"]
+    assert fixer_specs[-1].resume_session_id == "thread-1"
+
+
+def test_sessions_are_never_reused_across_tasks(rig: tuple[Runner, FakeAgent, FakeAgent]) -> None:
+    runner, fixer, _reviewer = rig
+    fixer.turns = [
+        says("ANSWER: first", session_id="thread-1"),
+        says("ANSWER: second", session_id="thread-2"),
+    ]
+
+    worked(runner, "first question")
+    worked(runner, "second question")
+
+    backend = runner.backends.get("fake")
+    assert isinstance(backend, FakeBackend)
+    fixer_specs = [spec for spec in backend.specs if spec.role == "fixer"]
+    assert len(fixer_specs) == 2
+    assert fixer_specs[0].resume_session_id is None
+    assert fixer_specs[1].resume_session_id is None
+
+
+def test_invalid_resumed_session_falls_back_to_the_durable_context(
+    rig: tuple[Runner, FakeAgent, FakeAgent],
+) -> None:
+    runner, fixer, _reviewer = rig
+    task = runner.store.add("explain it")
+    runner.store.save_session(task.id, "fixer", backend="fake", session_id="expired")
+    runner.store.append_message(task.id, "include the edge case")
+    fixer.native_resume = True
+    fixer.turns = [
+        says("session not found", error=True),
+        says("ANSWER: recovered", session_id="fresh"),
+    ]
+
+    claimed = runner.store.take_next()
+    assert claimed is not None
+    runner.handle(claimed)
+
+    final = runner.store.get(task.id)
+    assert final is not None and final.status == Status.DONE
+    assert len(fixer.prompts) == 2
+    assert "include the edge case" in fixer.prompts[1]
+    assert final.sessions["fixer"].session_id == "fresh"
+    assert any(
+        event["event"] == "task.session_fallback" for event in runner.audit.read(task=task.id)
+    )
+
+
+def test_message_during_review_invalidates_the_verdict(
+    rig: tuple[Runner, FakeAgent, FakeAgent],
+) -> None:
+    runner, fixer, reviewer = rig
+    fixer.turns = [
+        committing(runner, "one.txt"),
+        committing(runner, "two.txt", "included the follow-up"),
+    ]
+
+    def approve_after_message(prompt: str) -> AgentReply:
+        del prompt
+        active = runner._active_task
+        assert active is not None
+        runner.store.append_message(active.id, "also create two.txt")
+        return reply(APPROVE)
+
+    reviewer.turns = [approve_after_message, says(APPROVE)]
+
+    final = worked(runner, "create one.txt")
+
+    assert final.status == Status.DONE
+    assert "also create two.txt" in fixer.prompts[1]
+    assert (runner.config.root / "two.txt").exists()
+    assert any(event["event"] == "review.invalidated" for event in runner.audit.read(task=final.id))
 
 
 def test_strict_security_rejects_a_backend_without_native_guarantees(repo: Path) -> None:
@@ -208,6 +331,68 @@ def test_strict_security_rejects_a_backend_without_native_guarantees(repo: Path)
             RecordingFront(TaskStore(config.queue_path)),
             backends=BackendRegistry([FakeBackend(fakes)]),
         )
+
+
+def test_setup_persists_context_and_switches_roles_without_restart(
+    repo: Path, rig: tuple[Runner, FakeAgent, FakeAgent]
+) -> None:
+    runner, _, _ = rig
+    stages: list[str] = []
+
+    status, response = runner.apply_setup(
+        {
+            "agent": "fake",
+            "environment": "production",
+            "work_mode": "maintenance",
+            "summary": "prepare the release",
+            "external_actions": "ask",
+            "constraints": ["preserve the API"],
+        },
+        lambda stage, message: stages.append(stage),
+    )
+
+    assert status == 200 and response["ok"] is True
+    assert stages == ["validating", "saving", "activating", "complete"]
+    assert runner.fixer_backend == runner.reviewer_backend == "fake"
+    assert runner.config.project.environment == "production"
+    assert set(runner.setup_snapshot()["values"]) == {
+        "agent",
+        "environment",
+        "summary",
+        "external_actions",
+    }
+    saved = (repo / "agentq.toml").read_text(encoding="utf-8")
+    assert 'summary = "prepare the release"' in saved
+    assert 'constraints = ["preserve the API"]' in saved
+
+
+def test_setup_refuses_to_reconfigure_an_active_task(
+    rig: tuple[Runner, FakeAgent, FakeAgent],
+) -> None:
+    runner, _, _ = rig
+    runner._active_task = Task(id=1, text="busy")
+    status, response = runner.apply_setup({}, lambda stage, message: None)
+    assert status == 409
+    assert "active task" in response["error"]
+
+
+def test_interactive_front_can_recover_an_invalid_backend(repo: Path) -> None:
+    fakes = {"fixer": FakeAgent("fixer"), "reviewer": FakeAgent("reviewer")}
+    config = Config.load(repo)
+    config.fixer.backend = "missing"
+    config.reviewer.backend = "missing"
+    runner = Runner(
+        config,
+        RecordingFront(TaskStore(config.queue_path)),
+        supervise=False,
+        backends=BackendRegistry([FakeBackend(fakes)]),
+        allow_setup=True,
+    )
+    assert runner.fixer_backend == runner.reviewer_backend == ""
+
+    status, _ = runner.apply_setup({"agent": "fake"}, lambda stage, message: None)
+    assert status == 200
+    assert runner.fixer_backend == runner.reviewer_backend == "fake"
 
 
 def test_a_rejection_goes_back_to_the_fixer_in_the_same_session(
@@ -242,7 +427,7 @@ def test_a_structured_verdict_outranks_the_text(
 
 
 def test_compare_baseline_runs_known_failures_without_blocking_tasks(
-    rig: tuple[Runner, FakeAgent, FakeAgent]
+    rig: tuple[Runner, FakeAgent, FakeAgent],
 ) -> None:
     runner, _fixer, _reviewer = rig
     runner.config.baseline_checks = True
@@ -258,7 +443,7 @@ def test_compare_baseline_runs_known_failures_without_blocking_tasks(
 
 
 def test_strict_baseline_refuses_to_start_with_a_known_failure(
-    rig: tuple[Runner, FakeAgent, FakeAgent]
+    rig: tuple[Runner, FakeAgent, FakeAgent],
 ) -> None:
     runner, _fixer, _reviewer = rig
     runner.config.baseline_checks = True
@@ -339,7 +524,7 @@ def test_the_budget_is_a_ceiling_for_the_whole_task(
 
 
 def test_a_budget_blocks_if_runtime_cost_is_missing(
-    rig: tuple[Runner, FakeAgent, FakeAgent]
+    rig: tuple[Runner, FakeAgent, FakeAgent],
 ) -> None:
     runner, fixer, reviewer = rig
     runner.config.max_usd = 1.0
@@ -394,7 +579,7 @@ def test_run_until_stops_after_the_named_task(
 
 
 def test_run_recovers_review_work_on_a_new_attempt(
-    rig: tuple[Runner, FakeAgent, FakeAgent]
+    rig: tuple[Runner, FakeAgent, FakeAgent],
 ) -> None:
     runner, fixer, _reviewer = rig
     task = runner.store.add("answer this")
@@ -418,7 +603,7 @@ def test_run_recovers_review_work_on_a_new_attempt(
 
 
 def test_active_turn_can_be_cancelled_and_preserves_the_branch(
-    rig: tuple[Runner, FakeAgent, FakeAgent]
+    rig: tuple[Runner, FakeAgent, FakeAgent],
 ) -> None:
     runner, fixer, _reviewer = rig
     started = threading.Event()

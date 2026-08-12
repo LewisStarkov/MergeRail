@@ -21,6 +21,7 @@ three rounds is a task that needed a person in round one.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -39,15 +40,16 @@ from .backends import (
     TurnRequest,
 )
 from .backends.policy import strict_security_gaps
-from .config import Config
+from .config import CONFIG_NAME, Config, ensure_state_ignored, write_config
 from .detect import Check
-from .fronts.base import Front, StreamEvent
+from .fronts.base import Front, SetupProgress, StreamEvent
 from .gitctl import Worktree, attempt_branch, git, is_repo, repo_root
 from .lease import RunnerBusy, RunnerLease
+from .setup import configured_copy
 from .share import Share
 from .streaming import normalize_agent_event
 from .supervisor import Supervisor
-from .tasks import Status, Task, TaskStore
+from .tasks import Status, Task, TaskMessage, TaskStore
 
 
 class _RunnerEventSink(EventSink):
@@ -71,6 +73,7 @@ class Runner:
         supervise: bool = True,
         backends: BackendRegistry | None = None,
         share: Share | None = None,
+        allow_setup: bool = False,
     ) -> None:
         if config is None:
             start = Path.cwd()
@@ -86,34 +89,45 @@ class Runner:
         self.share = share
         self.worktree = Worktree(self.config.root, self.config.worktree)
         self.backends = backends or self.config.backend_registry()
-        self.fixer_backend = self._resolve_backend(self.config.fixer.backend)
-        self.reviewer_backend = self._resolve_backend(self.config.reviewer.backend)
-        self._validate_security()
+        self.fixer_backend = ""
+        self.reviewer_backend = ""
+        try:
+            self.fixer_backend = self._resolve_backend(self.config.fixer.backend)
+            self.reviewer_backend = self._resolve_backend(self.config.reviewer.backend)
+            self._validate_security()
+            self._validate_budget(self.fixer_backend, self.reviewer_backend)
+        except SystemExit:
+            if not allow_setup:
+                raise
+            self.fixer_backend = ""
+            self.reviewer_backend = ""
+            log.warn("runner.awaiting_setup", front=self.front.name)
         self.fixer: AgentSession | None = None
         self.reviewer: AgentSession | None = None
+        self._session_task_id: int | None = None
         self._active_task: Task | None = None
+        self._setup_lock = threading.RLock()
         #: What actually runs per round; ``run`` prunes it against the base.
         self.active_checks: list[Check] = list(self.config.checks)
         self.allowed_check_failures: frozenset[str] = frozenset()
         self.audit = AuditLog(self.config.audit_path)
         self.lease = RunnerLease(self.config.state_dir / "runner.lock")
         self.stopping = False
+        self.front.bind_setup(self)
 
     def _validate_security(self) -> None:
-        if not self.config.strict_security:
-            return
-        for role, backend in (
-            ("fixer", self.fixer_backend),
-            ("reviewer", self.reviewer_backend),
-        ):
-            info = self.backends.probe(backend)
-            assert isinstance(info, BackendInfo)
-            gaps = strict_security_gaps(role, info.capabilities)
-            if gaps:
-                raise SystemExit(
-                    f"agentq: strict security refuses {role}={backend}: missing "
-                    + ", ".join(gaps)
-                )
+        try:
+            self._validate_candidate_security(
+                self.config, self.fixer_backend, self.reviewer_backend
+            )
+        except ValueError as exc:
+            raise SystemExit(f"agentq: {exc}") from exc
+
+    def _validate_budget(self, fixer: str, reviewer: str) -> None:
+        try:
+            self._validate_candidate_budget(self.config, fixer, reviewer)
+        except ValueError as exc:
+            raise SystemExit(f"agentq: {exc}") from exc
 
     def _make_agent(
         self,
@@ -122,6 +136,7 @@ class Runner:
         *,
         read_only: bool = False,
         system_prompt: str = "",
+        resume_session_id: str | None = None,
     ) -> AgentSession:
         return self.backends.open_session(
             backend,
@@ -130,6 +145,7 @@ class Runner:
                 self.worktree.path,
                 read_only=read_only,
                 system_prompt=system_prompt,
+                resume_session_id=resume_session_id,
             ),
             _RunnerEventSink(self, backend, role),
         )
@@ -147,15 +163,26 @@ class Runner:
         except Exception as exc:
             log.warn("runner.stream_failed", task=task.id, error=log.clip(exc, 200))
 
-    def _agents(self) -> tuple[AgentSession, AgentSession]:
-        """Open role sessions after the shared worktree exists, then reuse them."""
+    def _agents(self, task: Task) -> tuple[AgentSession, AgentSession]:
+        """Open sessions owned by this task and reuse them only within its run."""
+        if self._session_task_id not in (None, task.id):
+            self._close_agent_sessions()
+        self._session_task_id = task.id
+        current = self.store.get(task.id) or task
         if self.fixer is None:
+            saved = current.sessions.get("fixer")
             self.fixer = self._make_agent(
                 self.fixer_backend,
                 "fixer",
-                system_prompt=prompts.fixer_system(self.config.conventions),
+                system_prompt=prompts.fixer_system(self.config.conventions, self.config.project),
+                resume_session_id=(
+                    saved.session_id
+                    if saved is not None and saved.backend == self.fixer_backend
+                    else None
+                ),
             )
         if self.reviewer is None:
+            saved = current.sessions.get("reviewer")
             reviewer_info = self.backends.probe(self.reviewer_backend)
             assert isinstance(reviewer_info, BackendInfo)
             self.reviewer = self._make_agent(
@@ -165,12 +192,24 @@ class Runner:
                 system_prompt=prompts.reviewer_system(
                     self.config.conventions,
                     structured=reviewer_info.capabilities.structured_output,
+                    project=self.config.project,
+                ),
+                resume_session_id=(
+                    saved.session_id
+                    if saved is not None and saved.backend == self.reviewer_backend
+                    else None
                 ),
             )
         return self.fixer, self.reviewer
 
     def _resolve_backend(self, requested: str) -> str:
-        choices = self.config.backend_order if requested in ("", "auto") else [requested]
+        try:
+            return self._resolve_backend_for(self.config, requested)
+        except ValueError as exc:
+            raise SystemExit(f"agentq: {exc}") from exc
+
+    def _resolve_backend_for(self, config: Config, requested: str) -> str:
+        choices = config.backend_order if requested in ("", "auto") else [requested]
         reasons: list[str] = []
         for name in choices:
             try:
@@ -182,7 +221,7 @@ class Runner:
             if info.available:
                 return name
             reasons.append(f"{name}: {info.reason or 'not available'}")
-        raise SystemExit("agentq: no usable agent backend (" + "; ".join(reasons) + ")")
+        raise ValueError("no usable agent backend (" + "; ".join(reasons) + ")")
 
     def _resolve_front(self, front: Front | str | None) -> Front:
         from .fronts import make_front
@@ -190,6 +229,101 @@ class Runner:
         if isinstance(front, Front):
             return front
         return make_front(front or "folder", self.config, self.store)
+
+    # --- interactive setup ----------------------------------------------
+
+    def setup_snapshot(self) -> dict[str, Any]:
+        with self._setup_lock:
+            available = self.backends.probe()
+            assert isinstance(available, dict)
+            return {
+                "initialized": (self.config.root / CONFIG_NAME).exists(),
+                "busy": self._active_task is not None,
+                "agents": {
+                    name: {
+                        "available": info.available,
+                        "reason": info.reason,
+                        "version": info.version,
+                    }
+                    for name, info in available.items()
+                },
+                "values": {
+                    "agent": self.config.fixer.backend,
+                    "environment": self.config.project.environment,
+                    "summary": self.config.project.summary,
+                    "external_actions": self.config.project.external_actions,
+                },
+            }
+
+    def apply_setup(
+        self, payload: Mapping[str, object], progress: SetupProgress
+    ) -> tuple[int, dict[str, Any]]:
+        with self._setup_lock:
+            if self._active_task is not None:
+                return 409, {"error": "finish or cancel the active task before setup"}
+            try:
+                progress("validating", "Checking project answers and agent availability")
+                candidate = configured_copy(self.config, payload)
+                fixer = self._resolve_backend_for(candidate, candidate.fixer.backend)
+                reviewer = self._resolve_backend_for(candidate, candidate.reviewer.backend)
+                self._validate_candidate_security(candidate, fixer, reviewer)
+                self._validate_candidate_budget(candidate, fixer, reviewer)
+                progress("saving", "Writing agentq.toml atomically")
+                write_config(candidate)
+                ensure_state_ignored(candidate.root)
+                progress("activating", "Switching the runner to the new agent roles")
+                self._close_agent_sessions()
+                self.config.fixer = candidate.fixer
+                self.config.reviewer = candidate.reviewer
+                self.config.project = candidate.project
+                self.fixer_backend = fixer
+                self.reviewer_backend = reviewer
+                self.audit.emit(
+                    "setup.completed",
+                    fixer=fixer,
+                    reviewer=reviewer,
+                    environment=candidate.project.environment,
+                    work_mode=candidate.project.work_mode,
+                )
+                progress("complete", "Setup complete; the next task uses this context")
+                return 200, {"ok": True}
+            except (OSError, ValueError) as exc:
+                progress("failed", str(exc))
+                return 400, {"error": str(exc)}
+
+    def _validate_candidate_security(self, config: Config, fixer: str, reviewer: str) -> None:
+        if not config.strict_security:
+            return
+        for role, backend in (("fixer", fixer), ("reviewer", reviewer)):
+            info = self.backends.probe(backend)
+            assert isinstance(info, BackendInfo)
+            gaps = strict_security_gaps(role, info.capabilities)
+            if gaps:
+                raise ValueError(
+                    f"strict security refuses {role}={backend}: missing " + ", ".join(gaps)
+                )
+
+    def _validate_candidate_budget(self, config: Config, fixer: str, reviewer: str) -> None:
+        if config.max_usd <= 0:
+            return
+        unsupported: list[str] = []
+        for role, backend in (("fixer", fixer), ("reviewer", reviewer)):
+            info = self.backends.probe(backend)
+            assert isinstance(info, BackendInfo)
+            if not info.capabilities.exact_cost_reporting:
+                unsupported.append(f"{role}={backend}")
+        if unsupported:
+            raise ValueError(
+                "task budget requires exact USD reporting; unsupported: " + ", ".join(unsupported)
+            )
+
+    def _close_agent_sessions(self) -> None:
+        for attribute in ("fixer", "reviewer"):
+            session = getattr(self, attribute)
+            if session is not None:
+                session.close()
+                setattr(self, attribute, None)
+        self._session_task_id = None
 
     # --- lifecycle -------------------------------------------------------
 
@@ -219,10 +353,10 @@ class Runner:
                 reviewer=self.reviewer_backend,
                 run_id=run_id,
             )
-            self._recover_agent_tasks()
-            self.active_checks = self._baseline()
             self.front.start()
             try:
+                self._recover_agent_tasks()
+                self.active_checks = self._baseline()
                 if self.share is not None:
                     self.share.start(self.front)
                 self.supervisor.start()
@@ -233,10 +367,7 @@ class Runner:
                     self.share.stop()
                 self.front.stop()
                 self.supervisor.stop()
-                if self.fixer is not None:
-                    self.fixer.close()
-                if self.reviewer is not None:
-                    self.reviewer.close()
+                self._close_agent_sessions()
                 self.audit.emit("runner.stopped", run_id=run_id)
         finally:
             self.lease.release()
@@ -302,6 +433,10 @@ class Runner:
             )
 
     def _recover_agent_tasks(self) -> None:
+        recovered_messages = self.store.recover_processing_messages()
+        if recovered_messages:
+            log.warn("runner.messages_recovered", count=recovered_messages)
+            self.audit.emit("task.messages_recovered", count=recovered_messages)
         for task in self.store.recover_orphans():
             log.warn("runner.task_recovered", task=task.id, branches=task.previous_branches)
             self.audit.emit(
@@ -338,8 +473,9 @@ class Runner:
                 log.exception("runner.task_crashed", task=task.id)
                 self.finish(task.id, Status.FAILED, f"the runner crashed: {log.clip(exc, 300)}")
             finally:
-                self._active_task = None
-                self._close_non_conversational_sessions()
+                with self._setup_lock:
+                    self._active_task = None
+                self._close_agent_sessions()
             if once or task.id == until:
                 return
 
@@ -348,27 +484,29 @@ class Runner:
         waited = self.store.get(task_id)
         return waited is None or not waited.is_open
 
-    def _close_non_conversational_sessions(self) -> None:
-        for attribute in ("fixer", "reviewer"):
-            session = getattr(self, attribute)
-            if session is not None and not session.capabilities.conversations:
-                session.close()
-                setattr(self, attribute, None)
-
     # --- one task --------------------------------------------------------
 
     def handle(self, task: Task) -> None:
         config = self.config
         base = config.base_branch
         branch = attempt_branch(config.branch_prefix, task.id, task.attempts)
-        self._active_task = task
+        with self._setup_lock:
+            self._active_task = task
         self._stream(task, StreamEvent("runner", "reset"))
+        if not self.fixer_backend or not self.reviewer_backend:
+            self.finish(
+                task.id,
+                Status.BLOCKED,
+                "agent setup is incomplete; use Project setup in Web or /init in Telegram, "
+                "then retry the task",
+            )
+            return
         log.info("runner.task_start", task=task.id, branch=branch, attempt=task.attempts)
         self.audit.emit("task.started", task=task.id, branch=branch, attempt=task.attempts)
 
         base_sha = git("rev-parse", base, cwd=config.root)
         self.worktree.reset(branch, base)
-        fixer, reviewer = self._agents()
+        fixer, reviewer = self._agents(task)
         current = self.store.update(task.id, branch=branch, note="", status=Status.RUNNING)
         self._stream(task, StreamEvent("runner", "status", "fixing"))
         self._stream(current or task, StreamEvent("fixer", "status", "working"))
@@ -378,6 +516,8 @@ class Runner:
         summary = ""
         objection = ""
         approved = False
+        claimed_messages = self._claim_messages(task.id)
+        next_prompt = ""
         for round_no in range(1, config.max_rounds + 1):
             if self._over_budget(spent):
                 self.finish(
@@ -388,22 +528,33 @@ class Runner:
                     cost=spent,
                 )
                 return
-            prompt = (
-                prompts.fix(task, branch, base, self.supervisor.error_digest())
+            prompt = next_prompt or (
+                prompts.fix(
+                    task,
+                    branch,
+                    base,
+                    self.supervisor.error_digest(),
+                    self.store.messages(task.id, limit=1000),
+                )
                 if round_no == 1
                 else prompts.revise(objection)
             )
+            next_prompt = ""
             remaining = self._remaining(spent)
             self._stream(task, StreamEvent("fixer", "status", f"round {round_no}"))
-            reply = self._ask(
+            fixer, reply = self._ask_role(
                 fixer,
                 task,
-                TurnRequest(prompt, max_cost_usd=remaining if remaining > 0 else None)
+                TurnRequest(prompt, max_cost_usd=remaining if remaining > 0 else None),
+                role="fixer",
+                backend=self.fixer_backend,
             )
             if reply is None:
                 return
             self._audit_reply(task.id, round_no, "fixer", self.fixer_backend, reply)
+            self._persist_session(task.id, "fixer", self.fixer_backend, reply)
             if reply.is_error:
+                self._mark_messages(task.id, claimed_messages, "failed")
                 self._stream(task, StreamEvent("fixer", "error", reply.text))
                 spent += reply.cost_usd or 0.0
                 self.finish(
@@ -413,12 +564,28 @@ class Runner:
                     cost=spent,
                 )
                 return
+            self.store.append_message(
+                task.id,
+                reply.text,
+                role="assistant",
+                mode="comment",
+                author="fixer",
+            )
+            self._mark_messages(task.id, claimed_messages, "answered")
+            claimed_messages = []
             self._stream(task, StreamEvent("fixer", "result", self._reply_text(reply)))
             turn_cost = self._turn_cost(task.id, self.fixer_backend, reply, spent)
             if turn_cost is None:
                 return
             spent += turn_cost
             summary = log.clip(reply.text, 600) or summary
+
+            new_messages = self._claim_messages(task.id)
+            if new_messages:
+                self.commit_leftovers(task)
+                claimed_messages = new_messages
+                next_prompt = prompts.follow_up(new_messages)
+                continue
 
             answer = prompts.answer_of(reply.text)
             if answer is not None and self.worktree.head() == base_sha:
@@ -456,23 +623,32 @@ class Runner:
                 log.warn("runner.checks_failed", task=task.id, round=round_no)
                 continue
 
+            new_messages = self._claim_messages(task.id)
+            if new_messages:
+                claimed_messages = new_messages
+                next_prompt = prompts.follow_up(new_messages)
+                continue
+
             self.store.update(task.id, status=Status.REVIEW, note=summary)
             self._stream(task, StreamEvent("runner", "status", "reviewing"))
             self._stream(task, StreamEvent("reviewer", "status", f"round {round_no}"))
             diff, stat = self._change_context(base)
             remaining = self._remaining(spent)
-            verdict = self._ask(
+            reviewer, verdict = self._ask_role(
                 reviewer,
                 task,
                 TurnRequest(
                     prompts.review(task, branch, base, report, diff, stat),
                     schema=prompts.REVIEW_SCHEMA,
                     max_cost_usd=remaining if remaining > 0 else None,
-                )
+                ),
+                role="reviewer",
+                backend=self.reviewer_backend,
             )
             if verdict is None:
                 return
             self._audit_reply(task.id, round_no, "reviewer", self.reviewer_backend, verdict)
+            self._persist_session(task.id, "reviewer", self.reviewer_backend, verdict)
             if verdict.is_error:
                 self._stream(task, StreamEvent("reviewer", "error", verdict.text))
                 spent += verdict.cost_usd or 0.0
@@ -489,9 +665,15 @@ class Runner:
                 return
             spent += turn_cost
             decision, objection = self._decision_of(verdict)
-            self.audit.emit(
-                "review.completed", task=task.id, round=round_no, approved=decision
-            )
+            new_messages = self._claim_messages(task.id)
+            if new_messages:
+                claimed_messages = new_messages
+                next_prompt = prompts.follow_up(new_messages)
+                self.audit.emit(
+                    "review.invalidated", task=task.id, round=round_no, messages=len(new_messages)
+                )
+                continue
+            self.audit.emit("review.completed", task=task.id, round=round_no, approved=decision)
             log.info("runner.reviewed", task=task.id, round=round_no, approved=decision)
             if decision is True:
                 approved = True
@@ -502,6 +684,7 @@ class Runner:
                 objection = "You did not end your reply with a VERDICT line. " + objection
 
         if not approved:
+            self._mark_messages(task.id, claimed_messages, "pending")
             self.finish(
                 task.id,
                 Status.FAILED,
@@ -529,9 +712,7 @@ class Runner:
     def _over_budget(self, spent: float) -> bool:
         return self.config.max_usd > 0 and spent >= self.config.max_usd
 
-    def _ask(
-        self, session: AgentSession, task: Task, request: TurnRequest
-    ) -> AgentReply | None:
+    def _ask(self, session: AgentSession, task: Task, request: TurnRequest) -> AgentReply | None:
         if self._cancel_requested(task.id):
             self._cancel_task(task)
             return None
@@ -548,6 +729,82 @@ class Runner:
             self._cancel_task(task)
             return None
         return reply
+
+    def _ask_role(
+        self,
+        session: AgentSession,
+        task: Task,
+        request: TurnRequest,
+        *,
+        role: str,
+        backend: str,
+    ) -> tuple[AgentSession, AgentReply | None]:
+        current = self.store.get(task.id)
+        saved = current.sessions.get(role) if current is not None else None
+        reply = self._ask(session, task, request)
+        if not (
+            reply is not None
+            and reply.is_error
+            and session.capabilities.native_resume
+            and saved is not None
+            and saved.backend == backend
+            and saved.session_id
+        ):
+            return session, reply
+
+        self.audit.emit("task.session_fallback", task=task.id, role=role, backend=backend)
+        self.store.clear_session(task.id, role)
+        session.close()
+        if role == "reviewer":
+            info = self.backends.probe(backend)
+            assert isinstance(info, BackendInfo)
+            replacement = self._make_agent(
+                backend,
+                role,
+                read_only=True,
+                system_prompt=prompts.reviewer_system(
+                    self.config.conventions,
+                    structured=info.capabilities.structured_output,
+                    project=self.config.project,
+                ),
+            )
+        else:
+            replacement = self._make_agent(
+                backend,
+                role,
+                system_prompt=prompts.fixer_system(self.config.conventions, self.config.project),
+            )
+        setattr(self, role, replacement)
+        return replacement, self._ask(replacement, task, request)
+
+    def _claim_messages(self, task_id: int) -> list[TaskMessage]:
+        messages = self.store.claim_pending_messages(task_id)
+        for message in messages:
+            self.audit.emit(
+                "task.message_claimed",
+                task=task_id,
+                message_id=message.id,
+                mode=message.mode,
+                chars=len(message.text),
+            )
+        return messages
+
+    def _mark_messages(self, task_id: int, messages: list[TaskMessage], status: str) -> None:
+        for message in messages:
+            if self.store.update_message(task_id, message.id, status=status) is not None:
+                self.audit.emit(f"task.message_{status}", task=task_id, message_id=message.id)
+
+    def _persist_session(self, task_id: int, role: str, backend: str, reply: AgentReply) -> None:
+        if reply.session_id:
+            self.store.save_session(
+                task_id,
+                role,
+                backend=backend,
+                session_id=reply.session_id,
+                context_tokens=reply.context_tokens,
+            )
+        else:
+            self.store.clear_session(task_id, role)
 
     def _cancel_requested(self, task_id: int) -> bool:
         current = self.store.get(task_id)
@@ -693,9 +950,7 @@ class Runner:
                 )
             return
 
-        completed = self.store.complete_delivery(
-            task.id, landed.outcome, url=landed.url
-        )
+        completed = self.store.complete_delivery(task.id, landed.outcome, url=landed.url)
         if completed is None:
             self.finish(task.id, Status.FAILED, "delivery succeeded but its task disappeared")
             return
@@ -772,6 +1027,12 @@ class Runner:
         self.audit.emit("task.finished", task=task_id, status=status, cost_usd=cost, note=note)
         event = {Status.DONE: "done", Status.BLOCKED: "blocked"}.get(status, "failed")
         self.report(task, event, note)
+        if status == Status.DONE and self.store.message_stats(task_id)["pending_message_count"]:
+            follow_up = self.store.retry_task(task_id)
+            if follow_up is not None:
+                self.audit.emit(
+                    "task.followup_queued", task=task_id, attempt=follow_up.attempts + 1
+                )
 
     def report(self, task: Task, event: str, text: str) -> None:
         try:

@@ -11,6 +11,7 @@
     --line: #e0e0e0; --accent: #0f62fe; --accent-strong: #0043ce;
     --danger: #da1e28; --sidebar: #f4f4f4; --sidebar-panel: #ffffff;
     --sidebar-line: #c6c6c6; --sidebar-ink: #161616; --sidebar-dim: #525252;
+    --sidebar-width: 20rem; --sidebar-rail-width: 3rem; --topbar-height: 3rem;
   }
   * { box-sizing: border-box; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -74,23 +75,55 @@
   .history { color: var(--dim); font-size: .78rem; margin-top: .35rem; }
   .empty { color: var(--sidebar-dim); text-align: center; margin-top: 2.5rem; }
   .empty-icon { display: block; margin-bottom: .35rem; font-size: 1.4rem; }
-  .workbench { display: grid; grid-template-columns: 20rem 1fr; min-height: 100vh; }
+  .workbench {
+    display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    min-height: 100vh;
+    transition: grid-template-columns .26s cubic-bezier(.2, 0, 0, 1);
+  }
+  .workbench.sidebar-collapsed {
+    grid-template-columns: var(--sidebar-rail-width) minmax(0, 1fr);
+  }
   .sidebar {
-    height: 100vh; overflow: auto; padding: 0;
+    height: 100vh; overflow-x: hidden; overflow-y: auto; padding: 0;
     border-right: 1px solid var(--sidebar-line); background: var(--sidebar);
     color: var(--sidebar-ink);
     scrollbar-color: var(--sidebar-line) transparent;
   }
   .brand-row {
-    display: flex; align-items: center; height: 3rem; margin: 0; padding: 0 1rem;
-    background: #161616; color: #fff;
+    display: flex; align-items: center; height: var(--topbar-height); margin: 0; padding: 0 1rem;
+    border-bottom: 1px solid #393939; background: #161616; color: #fff;
   }
   .brand { display: flex; align-items: center; gap: .7rem; }
-  .brand-icon {
-    display: grid; width: auto; height: 2rem; place-items: center;
-    border: 0; border-radius: 0; background: none; color: #78a9ff;
-  }
   .brand-caption { color: #c6c6c6; font-size: .7rem; }
+  .sidebar-toggle {
+    justify-content: center; width: 2rem; height: 2rem; margin-left: auto; padding: 0;
+    border: 0; color: #c6c6c6;
+  }
+  .sidebar-toggle .bi { transition: transform .26s cubic-bezier(.2, 0, 0, 1); }
+  .sidebar-toggle:hover { background: #393939; color: #fff; }
+  .workbench.sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
+  .workbench.sidebar-collapsed .brand,
+  .workbench.sidebar-collapsed #composer,
+  .workbench.sidebar-collapsed .setup-panel,
+  .workbench.sidebar-collapsed .queue-heading { display: none; }
+  .workbench.sidebar-collapsed .sidebar-toggle { margin-left: 0; }
+  .workbench.sidebar-collapsed .sidebar-toggle .bi { transform: rotate(180deg); }
+  .sidebar-shortcuts {
+    display: flex; flex-direction: column; max-height: 0; overflow: hidden;
+    opacity: 0; visibility: hidden; transform: translateY(-.35rem);
+    transition: max-height .26s cubic-bezier(.2, 0, 0, 1), opacity .16s ease,
+      transform .26s cubic-bezier(.2, 0, 0, 1), visibility 0s linear .26s;
+  }
+  .sidebar-shortcut {
+    flex: 0 0 var(--sidebar-rail-width); justify-content: center;
+    width: var(--sidebar-rail-width); height: var(--sidebar-rail-width); padding: 0;
+    border-width: 0 0 1px; background: var(--sidebar-panel); color: var(--sidebar-dim);
+  }
+  .sidebar-shortcut:hover { background: #e8e8e8; color: var(--accent); }
+  .workbench.sidebar-collapsed .sidebar-shortcuts {
+    max-height: calc(var(--sidebar-rail-width) * 2); opacity: 1; visibility: visible;
+    transform: translateY(0); transition-delay: 0s;
+  }
   .queue-heading #summary {
     margin-left: auto; color: var(--sidebar-dim); font-size: .72rem;
     font-variant-numeric: tabular-nums; white-space: nowrap;
@@ -101,6 +134,24 @@
   }
   .sidebar textarea { min-height: 4.5rem; color: var(--sidebar-ink); }
   .sidebar textarea::placeholder { color: #8d8d8d; }
+  .setup-panel { margin: 0 1rem 1rem; border: 1px solid var(--sidebar-line); background: #fff; }
+  .setup-panel > summary {
+    display: flex; align-items: center; gap: .5rem; padding: .7rem .8rem;
+    cursor: pointer; font-weight: 600;
+  }
+  .setup-panel > summary .setup-mark { margin-left: auto; color: var(--sidebar-dim); }
+  .setup-panel form { margin: 0; border: 0; border-top: 1px solid var(--line); }
+  .setup-grid { display: grid; gap: .55rem; }
+  .setup-field { display: grid; gap: .2rem; min-width: 0; color: var(--sidebar-dim); font-size: .72rem; }
+  .setup-field select, .setup-field input, .setup-field textarea {
+    width: 100%; min-height: 2.1rem; padding: .35rem .45rem; border: 1px solid var(--line);
+    background: #fff; color: var(--sidebar-ink); font: inherit;
+  }
+  .setup-field textarea { min-height: 3.4rem; }
+  .setup-progress { padding: 0 .8rem .8rem; color: var(--sidebar-dim); font-size: .75rem; }
+  .setup-progress[data-status="failed"] { color: var(--danger); }
+  .setup-progress[data-status="complete"] { color: #198038; }
+  .setup-history { margin: .35rem 0 0; padding-left: 1.1rem; }
   .queue-heading {
     display: flex; align-items: center; gap: .5rem; margin: 1.5rem 1rem .5rem;
     color: var(--sidebar-dim);
@@ -130,15 +181,42 @@
     color: var(--sidebar-dim); font-size: .72rem;
   }
   .queue-list .task .meta span { display: inline-flex; align-items: center; gap: .3rem; }
+  .pending-badge {
+    padding: .05rem .35rem; background: var(--accent); color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+  .queue-list .task[data-status="running"] .status-icon,
+  .queue-list .task[data-status="review"] .status-icon,
+  .queue-list .task[data-status="delivering"] .status-icon,
+  .queue-list .task[data-status="cancelling"] .status-icon { color: var(--accent); }
+  .queue-list .task[data-status="approved"] .status-icon,
+  .queue-list .task[data-status="done"] .status-icon { color: #198038; }
+  .queue-list .task[data-status="failed"] .status-icon,
+  .queue-list .task[data-status="blocked"] .status-icon { color: var(--danger); }
+  .workbench.sidebar-collapsed .queue-list .task {
+    display: flex; align-items: center; justify-content: center;
+    width: var(--sidebar-rail-width); height: var(--sidebar-rail-width); padding: 0;
+  }
+  .workbench.sidebar-collapsed .queue-list .task.selected {
+    border-left: 0; box-shadow: inset 3px 0 var(--accent);
+  }
+  .workbench.sidebar-collapsed .queue-list .task header {
+    align-items: center; justify-content: center; width: 100%; height: 100%; gap: 0;
+  }
+  .workbench.sidebar-collapsed .queue-list .task .status-icon { margin: 0; }
+  .workbench.sidebar-collapsed .queue-list .task .id,
+  .workbench.sidebar-collapsed .queue-list .task .text,
+  .workbench.sidebar-collapsed .queue-list .task .meta,
+  .workbench.sidebar-collapsed .queue-list .empty { display: none; }
   .detail { height: 100vh; overflow: auto; background: var(--bg); }
   .detail-empty {
-    display: grid; min-height: 100%; place-items: center; padding: 2rem;
+    display: grid; min-height: calc(100% - var(--topbar-height)); place-items: center; padding: 2rem;
     color: var(--dim); text-align: center;
   }
   .detail-top {
     position: sticky; z-index: 2; top: 0; display: flex; align-items: center;
-    gap: .65rem; min-height: 3rem; padding: .5rem 1rem;
-    border-bottom: 1px solid var(--line); background: #161616; color: #fff;
+    gap: .65rem; height: var(--topbar-height); padding: 0 1rem;
+    border-bottom: 1px solid #393939; background: #161616; color: #fff;
   }
   .detail-status { display: inline-flex; align-items: center; gap: .5rem; color: #c6c6c6; }
   .detail-status .status-icon { color: var(--accent); }
@@ -176,6 +254,34 @@
   .detail-note.blocked { border-color: var(--danger); }
   .detail-section.result .detail-note { font-size: .96rem; line-height: 1.65; }
   .detail-section a { display: inline-flex; align-items: center; gap: .4rem; color: var(--accent); }
+  .thread-heading { align-items: center; }
+  .thread-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .thread-list { display: grid; gap: .75rem; }
+  .thread-message {
+    max-width: min(52rem, 92%); padding: .85rem 1rem;
+    border: 1px solid var(--line); background: var(--card);
+  }
+  .thread-message.user { margin-left: auto; background: #edf5ff; border-color: #a6c8ff; }
+  .thread-message.system { max-width: 100%; background: #fff; color: var(--dim); }
+  .thread-message.failed { border-color: var(--danger); }
+  .thread-message-head {
+    display: flex; align-items: center; flex-wrap: wrap; gap: .35rem;
+    margin-bottom: .35rem; color: var(--dim); font-size: .72rem;
+  }
+  .thread-message-head .message-status { margin-left: auto; }
+  .thread-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .thread-attachment { margin-top: .45rem; color: var(--dim); font-size: .75rem; }
+  .thread-more { margin-top: .75rem; }
+  .thread-error { margin-top: .65rem; color: var(--danger); }
+  .thread-composer {
+    position: sticky; z-index: 1; bottom: 0; margin: 1.25rem -.5rem 0;
+    padding: .75rem; border-color: var(--line); background: rgba(255, 255, 255, .97);
+    box-shadow: 0 -1px 0 var(--line);
+  }
+  .thread-composer textarea { min-height: 4rem; }
+  .thread-composer .comment { margin-left: auto; }
+  .thread-composer .primary { margin-left: 0; }
+  .thread-empty { padding: 1.25rem; border: 1px dashed var(--line); color: var(--dim); }
   .detail .live {
     margin-top: 2rem; padding: .85rem 1rem; border: 1px solid var(--line);
     border-radius: 0; background: var(--card);
@@ -192,12 +298,26 @@
       border-bottom: 1px solid var(--line);
     }
     .detail { height: auto; min-height: 52vh; }
-    .detail-top { position: static; padding: .8rem 1rem; }
+    .workbench.sidebar-collapsed .queue-list { display: flex; overflow-x: auto; }
+    .workbench.sidebar-collapsed .sidebar-shortcuts {
+      flex-direction: row; max-height: var(--sidebar-rail-width);
+    }
+    .workbench.sidebar-collapsed .queue-list .task { flex: 0 0 var(--sidebar-rail-width); }
+    .workbench.sidebar-collapsed .queue-list .task.selected {
+      box-shadow: inset 0 -3px var(--accent);
+    }
+    .detail-top { position: static; }
+    .detail-status span:last-child { display: none; }
     .detail-body { padding: 1.5rem 1rem 4rem; }
     .detail-title { font-size: clamp(1.55rem, 8vw, 2.2rem); }
     .facts { grid-template-columns: 1fr 1fr; }
     .fact:nth-child(odd) { border-left: 0; }
     .fact:nth-child(n+3) { border-top: 1px solid var(--line); }
+    .thread-message { max-width: 96%; }
+    .thread-composer { margin-right: 0; margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .workbench, .sidebar-toggle .bi, .sidebar-shortcuts { transition: none; }
   }
 </style>
 <body>
@@ -205,13 +325,27 @@
   <aside class="sidebar">
     <div class="brand-row">
       <div class="brand">
-        <span class="brand-icon"><i class="bi bi-terminal" aria-hidden="true"></i></span>
         <div>
           <h1>agentq</h1>
           <div class="brand-caption">Agent workbench</div>
         </div>
       </div>
+      <button class="sidebar-toggle" id="sidebar-toggle" type="button"
+              aria-label="Collapse sidebar" aria-expanded="true" aria-controls="sidebar-content">
+        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+      </button>
     </div>
+    <div class="sidebar-content" id="sidebar-content">
+    <nav class="sidebar-shortcuts" aria-label="Sidebar shortcuts">
+      <button class="sidebar-shortcut" id="sidebar-new-task" type="button"
+              aria-label="Add task" title="Add task" aria-controls="composer">
+        <i class="bi bi-plus-lg" aria-hidden="true"></i>
+      </button>
+      <button class="sidebar-shortcut" id="sidebar-project-settings" type="button"
+              aria-label="Project settings" title="Project settings" aria-controls="setup-panel">
+        <i class="bi bi-sliders" aria-hidden="true"></i>
+      </button>
+    </nav>
     <form id="composer">
       <textarea id="text" placeholder="Describe a task…"></textarea>
       <div class="row">
@@ -225,11 +359,44 @@
         </button>
       </div>
     </form>
+    <details class="setup-panel" id="setup-panel">
+      <summary>
+        <i class="bi bi-sliders" aria-hidden="true"></i>
+        Project setup
+        <span class="setup-mark" id="setup-mark"></span>
+      </summary>
+      <form id="setup-form">
+        <div class="setup-grid">
+          <label class="setup-field">AI agent
+            <select id="setup-agent"></select>
+          </label>
+          <label class="setup-field">Environment
+            <select id="setup-environment">
+              <option value="local">Local</option><option value="staging">Staging</option>
+              <option value="production">Production</option>
+            </select>
+          </label>
+          <label class="setup-field">Current objective
+            <textarea id="setup-summary" placeholder="Project and current objective"></textarea>
+          </label>
+          <label class="setup-field">Actions outside repository
+            <select id="setup-external">
+              <option value="forbid">Never</option><option value="ask">Ask first</option>
+            </select>
+          </label>
+        </div>
+        <button type="submit" class="primary" id="setup-submit">
+          <i class="bi bi-check2" aria-hidden="true"></i> Save setup
+        </button>
+      </form>
+      <div class="setup-progress" id="setup-progress" aria-live="polite"></div>
+    </details>
     <div class="queue-heading">
       <h2>Tasks</h2>
       <span id="summary"></span>
     </div>
     <div class="queue-list" id="tasks"></div>
+    </div>
   </aside>
   <main class="detail" id="detail"></main>
 </div>
@@ -239,10 +406,16 @@ let rendered = "";  // rebuild the list only when it changed, so a button
 const expandedStreams = new Set();
 let selectedTaskId = null;
 let taskSnapshot = [];
+let setupSignature = "";
+const threadCache = new Map();
+const threadDrafts = new Map();
+const threadFiles = new Map();
+const workbench = document.querySelector(".workbench");
+const sidebarToggle = document.getElementById("sidebar-toggle");
 const statusIcons = {
   new: "circle", running: "arrow-repeat", review: "search", approved: "check2-circle",
   delivering: "git", done: "check2", failed: "x-lg", blocked: "exclamation-triangle",
-  closed: "archive",
+  cancelling: "stop-circle", closed: "archive",
 };
 async function refresh() {
   let raw;
@@ -258,6 +431,7 @@ function renderPayload(raw) {
   if (signature === rendered) return;
   rendered = signature;
   const tasks = payload.tasks || [];
+  renderSetup(payload.setup || {});
   taskSnapshot = tasks;
   if (!tasks.some((task) => task.id === selectedTaskId))
     selectedTaskId = (tasks.find((task) => task.open) || tasks[0] || {}).id || null;
@@ -266,7 +440,60 @@ function renderPayload(raw) {
     tasks.length ? `${open} open · ${tasks.length} total` : "";
   const root = document.getElementById("tasks");
   root.replaceChildren(...(tasks.length ? tasks.map(card) : [empty()]));
-  renderDetail(tasks.find((task) => task.id === selectedTaskId));
+  const selected = tasks.find((task) => task.id === selectedTaskId);
+  renderDetail(selected);
+  if (selected) syncThread(selected);
+}
+
+function renderSetup(setup) {
+  const panel = document.getElementById("setup-panel");
+  const progress = setup.progress || {};
+  const values = setup.values || {};
+  const signature = JSON.stringify({agents: setup.agents || {}, values});
+  if (signature !== setupSignature) {
+    setupSignature = signature;
+    const agents = setup.agents || {};
+    fillAgentSelect("setup-agent", agents, values.agent || "auto");
+    document.getElementById("setup-environment").value = values.environment || "local";
+    document.getElementById("setup-summary").value = values.summary || "";
+    document.getElementById("setup-external").value = values.external_actions || "forbid";
+  }
+  if (!setup.initialized || ["running", "failed"].includes(progress.status)) panel.open = true;
+  document.getElementById("setup-mark").textContent =
+    progress.status === "running" ? "working…" : setup.initialized ? "ready" : "required";
+  const status = document.getElementById("setup-progress");
+  status.dataset.status = progress.status || "idle";
+  status.replaceChildren();
+  if (progress.message) status.append(line("div", "", progress.message));
+  if ((progress.history || []).length > 1) {
+    const history = document.createElement("ol");
+    history.className = "setup-history";
+    history.append(...progress.history.map((item) =>
+      line("li", "", `${item.stage}: ${item.message}`)));
+    status.append(history);
+  }
+  document.getElementById("setup-submit").disabled =
+    progress.status === "running" || setup.busy || setup.available === false;
+}
+
+function fillAgentSelect(id, agents, selected) {
+  const select = document.getElementById(id);
+  const options = [];
+  options.push({value: "auto", label: "Auto (first available)"});
+  for (const [name, info] of Object.entries(agents)) {
+    options.push({
+      value: name,
+      label: `${name}${info.available ? "" : ` — unavailable${info.reason ? `: ${info.reason}` : ""}`}`,
+    });
+  }
+  select.replaceChildren(...options.map((item) => {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = item.label;
+    option.disabled = item.value !== "auto" && !agents[item.value]?.available;
+    return option;
+  }));
+  select.value = options.some((item) => item.value === selected) ? selected : "auto";
 }
 
 function empty() {
@@ -283,8 +510,11 @@ function card(t) {
   const el = document.createElement("article");
   el.className = `task${t.id === selectedTaskId ? " selected" : ""}`;
   el.dataset.id = String(t.id);
+  el.dataset.status = t.status;
+  el.title = `#${t.id} · ${t.status} · ${t.text || "attachment only"}`;
   el.tabIndex = 0;
   el.setAttribute("role", "button");
+  el.setAttribute("aria-label", el.title);
   el.onclick = () => selectTask(t.id);
   el.onkeydown = (event) => {
     if (event.key === "Enter" || event.key === " ") selectTask(t.id);
@@ -302,6 +532,12 @@ function card(t) {
   if (t.file) meta.append(metaItem("paperclip", "attachment"));
   if (t.branch) meta.append(metaItem("git", t.branch));
   if (t.attempts > 1) meta.append(metaItem("arrow-repeat", `attempt ${t.attempts}`));
+  if (t.message_count) meta.append(metaItem("chat-left-text", `${t.message_count} messages`));
+  if (t.pending_message_count) {
+    const pending = metaItem("hourglass-split", `${t.pending_message_count} pending`);
+    pending.classList.add("pending-badge");
+    meta.append(pending);
+  }
   el.append(meta);
   return el;
 }
@@ -316,25 +552,28 @@ function selectTask(id) {
   selectedTaskId = id;
   document.querySelectorAll(".queue-list .task").forEach((task) =>
     task.classList.toggle("selected", Number(task.dataset.id) === id));
-  renderDetail(taskSnapshot.find((task) => task.id === id));
+  const selected = taskSnapshot.find((task) => task.id === id);
+  renderDetail(selected);
+  if (selected) syncThread(selected);
 }
 
 function renderDetail(t) {
   const root = document.getElementById("detail");
-  if (!t) {
-    const blank = line("div", "detail-empty", "Select a task from the queue.");
-    root.replaceChildren(blank);
-    return;
-  }
   const top = document.createElement("header");
   top.className = "detail-top";
   const status = document.createElement("span");
   status.className = "detail-status";
   status.append(
-    icon(statusIcons[t.status] || "circle", "status-icon"),
-    line("span", "", `Task #${t.id} · ${t.status}`),
+    icon(statusIcons[t?.status] || "circle", "status-icon"),
+    line("span", "", t ? `Task #${t.id} · ${t.status}` : "No task selected"),
   );
-  top.append(status, actions(t));
+  top.append(status);
+  if (t) top.append(actions(t));
+  if (!t) {
+    const blank = line("div", "detail-empty", "Select a task from the queue.");
+    root.replaceChildren(top, blank);
+    return;
+  }
   const body = document.createElement("div");
   body.className = "detail-body";
   body.append(line("h2", "detail-title", t.text || "Attachment-only task"));
@@ -348,6 +587,7 @@ function renderDetail(t) {
   if (t.cost_usd) facts.append(fact("Cost", `$${t.cost_usd.toFixed(2)}`, "currency-dollar"));
   body.append(facts);
   if (t.delivery) body.append(delivery(t.delivery));
+  body.append(thread(t));
   if (t.live && Object.keys(t.live.roles || {}).length) body.append(live(t.id, t.live));
   if (t.note) body.append(section("Result", t.note, "check2-square"));
   if (t.url && /^https?:\/\//.test(t.url)) {
@@ -389,6 +629,238 @@ function delivery(value) {
   if (value.error) note.textContent += `
 ${value.error}`;
   return wrap;
+}
+
+function cachedThread(taskId) {
+  if (!threadCache.has(taskId)) {
+    threadCache.set(taskId, {
+      messages: [], loaded: false, loading: false, sending: false,
+      total: 0, signature: "", error: "",
+    });
+  }
+  return threadCache.get(taskId);
+}
+
+function threadSignature(value) {
+  return [
+    Number(value.message_count || 0),
+    Number(value.pending_message_count || 0),
+    Number(value.message_revision || 0),
+    value.last_message_at || "",
+  ].join(":");
+}
+
+function syncThread(task) {
+  const state = cachedThread(task.id);
+  const signature = threadSignature(task);
+  if (!state.loaded || state.signature !== signature) loadThread(task.id, true);
+}
+
+async function loadThread(taskId, reset = false) {
+  const state = cachedThread(taskId);
+  if (state.loading) return;
+  state.loading = true;
+  state.error = "";
+  if (reset) {
+    state.messages = [];
+    state.loaded = false;
+  }
+  if (selectedTaskId === taskId)
+    renderDetail(taskSnapshot.find((task) => task.id === taskId));
+  const after = reset || !state.messages.length ? 0 : state.messages[state.messages.length - 1].id;
+  try {
+    const response = await fetch(`/api/tasks/${taskId}/messages?after=${after}&limit=50`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not load discussion");
+    const incoming = Array.isArray(payload.messages) ? payload.messages : [];
+    const combined = reset ? incoming : [...state.messages, ...incoming];
+    state.messages = Array.from(new Map(combined.map((message) => [message.id, message])).values())
+      .sort((left, right) => left.id - right.id);
+    state.total = Number(payload.message_count || 0);
+    state.signature = threadSignature(payload);
+    state.loaded = true;
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : "Could not load discussion";
+  } finally {
+    state.loading = false;
+    if (selectedTaskId === taskId)
+      renderDetail(taskSnapshot.find((task) => task.id === taskId));
+  }
+}
+
+function thread(task) {
+  const state = cachedThread(task.id);
+  const wrap = document.createElement("section");
+  wrap.className = "detail-section thread";
+  const heading = document.createElement("h3");
+  heading.className = "thread-heading";
+  heading.append(
+    icon("chat-left-text"),
+    line("span", "", "Discussion"),
+    line("span", "thread-count", `${state.total || task.message_count || 0} messages`),
+  );
+  wrap.append(heading);
+
+  const list = document.createElement("div");
+  list.className = "thread-list";
+  list.setAttribute("aria-live", "polite");
+  list.append(messageBubble({
+    role: "user",
+    author: task.author || task.source || "user",
+    text: task.text || "Attachment-only task",
+    file: task.file,
+    status: "original task",
+    created_at: task.created_at,
+  }));
+  list.append(...state.messages.map(messageBubble));
+  if (!state.loaded && state.loading)
+    list.append(line("div", "thread-empty", "Loading discussion…"));
+  wrap.append(list);
+
+  if (state.loaded && state.messages.length < state.total) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "thread-more";
+    more.disabled = state.loading;
+    more.append(icon("arrow-down-circle"), line("span", "", "Load more messages"));
+    more.onclick = () => loadThread(task.id);
+    wrap.append(more);
+  }
+  if (state.error) wrap.append(line("div", "thread-error", state.error));
+  wrap.append(threadComposer(task.id, state));
+  return wrap;
+}
+
+function messageBubble(message) {
+  const role = ["user", "assistant", "system"].includes(message.role)
+    ? message.role : "system";
+  const box = document.createElement("article");
+  box.className = `thread-message ${role}${message.status === "failed" ? " failed" : ""}`;
+  const head = document.createElement("div");
+  head.className = "thread-message-head";
+  head.append(
+    icon(role === "user" ? "person" : role === "assistant" ? "cpu" : "info-circle"),
+    line("span", "", message.author ? `${message.author} · ${role}` : role),
+  );
+  if (message.mode) head.append(line("span", "", message.mode));
+  const timestamp = formatTimestamp(message.created_at);
+  if (timestamp) head.append(line("time", "", timestamp));
+  if (message.status) head.append(line("span", "message-status", message.status));
+  box.append(head, line("div", "thread-message-text", message.text || ""));
+  if (message.file) {
+    const name = String(message.file).split(/[\\/]/).pop() || "attachment";
+    const attachment = document.createElement("div");
+    attachment.className = "thread-attachment";
+    attachment.append(icon("paperclip"), line("span", "", name));
+    box.append(attachment);
+  }
+  return box;
+}
+
+function formatTimestamp(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
+}
+
+function threadComposer(taskId, state) {
+  const form = document.createElement("form");
+  form.className = "thread-composer";
+  const input = document.createElement("textarea");
+  input.placeholder = "Add context or a follow-up…";
+  input.value = threadDrafts.get(taskId) || "";
+  input.disabled = state.sending;
+  input.oninput = () => threadDrafts.set(taskId, input.value);
+  input.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") form.requestSubmit();
+  });
+  form.append(input);
+
+  const row = document.createElement("div");
+  row.className = "row";
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.id = `thread-file-${taskId}`;
+  picker.onchange = () => {
+    const file = picker.files[0];
+    if (file) threadFiles.set(taskId, file); else threadFiles.delete(taskId);
+    label.querySelector("span").textContent = file?.name || "Attach context";
+  };
+  const label = document.createElement("label");
+  label.className = "attachment-control";
+  label.htmlFor = picker.id;
+  label.append(
+    icon("paperclip"),
+    line("span", "", threadFiles.get(taskId)?.name || "Attach context"),
+  );
+  const comment = document.createElement("button");
+  comment.type = "submit";
+  comment.dataset.mode = "comment";
+  comment.className = "comment";
+  comment.disabled = state.sending;
+  comment.append(icon("chat"), line("span", "", "Comment"));
+  const send = document.createElement("button");
+  send.type = "submit";
+  send.dataset.mode = "instruction";
+  send.className = "primary";
+  send.disabled = state.sending;
+  send.append(icon("arrow-up"), line("span", "", state.sending ? "Sending…" : "Send to agent"));
+  row.append(picker, label, comment, send);
+  form.append(row);
+  form.onsubmit = (event) => {
+    event.preventDefault();
+    const mode = event.submitter?.dataset.mode || "instruction";
+    submitThreadMessage(taskId, mode);
+  };
+  return form;
+}
+
+async function submitThreadMessage(taskId, mode) {
+  const state = cachedThread(taskId);
+  const text = (threadDrafts.get(taskId) || "").trim();
+  if (!text || state.sending) return;
+  state.sending = true;
+  state.error = "";
+  renderDetail(taskSnapshot.find((task) => task.id === taskId));
+  const payload = {
+    text,
+    mode,
+    idempotency_key: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+  };
+  const file = threadFiles.get(taskId);
+  try {
+    if (file) {
+      const data = await readFile(file);
+      payload.file = {name: file.name, data};
+    }
+    const response = await fetch(`/api/tasks/${taskId}/messages`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    const answer = await response.json();
+    if (!response.ok) throw new Error(answer.error || "Could not send message");
+    threadDrafts.delete(taskId);
+    threadFiles.delete(taskId);
+    await loadThread(taskId, true);
+    await refresh();
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : "Could not send message";
+  } finally {
+    state.sending = false;
+    if (selectedTaskId === taskId)
+      renderDetail(taskSnapshot.find((task) => task.id === taskId));
+  }
+}
+
+async function readFile(file) {
+  const value = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  return String(value).split(",", 2)[1];
 }
 
 function live(taskId, trace) {
@@ -524,6 +996,20 @@ document.getElementById("composer").onsubmit = async (event) => {
   refresh();
 };
 
+document.getElementById("setup-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const payload = {
+    agent: document.getElementById("setup-agent").value,
+    environment: document.getElementById("setup-environment").value,
+    summary: document.getElementById("setup-summary").value,
+    external_actions: document.getElementById("setup-external").value,
+  };
+  await fetch("/api/setup", {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
+  });
+  refresh();
+};
+
 document.getElementById("file").onchange = (event) => {
   document.getElementById("file-label").textContent =
     event.target.files[0]?.name || "Attach context";
@@ -533,6 +1019,27 @@ document.getElementById("text").addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter")
     document.getElementById("composer").requestSubmit();
 });
+
+function setSidebarCollapsed(collapsed) {
+  workbench.classList.toggle("sidebar-collapsed", collapsed);
+  sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+  sidebarToggle.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+  sidebarToggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+}
+
+sidebarToggle.onclick = () =>
+  setSidebarCollapsed(!workbench.classList.contains("sidebar-collapsed"));
+
+document.getElementById("sidebar-new-task").onclick = () => {
+  setSidebarCollapsed(false);
+  document.getElementById("text").focus();
+};
+
+document.getElementById("sidebar-project-settings").onclick = () => {
+  setSidebarCollapsed(false);
+  document.getElementById("setup-panel").open = true;
+  document.getElementById("setup-agent").focus();
+};
 
 refresh();
 const events = new EventSource("/api/events");

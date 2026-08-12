@@ -15,9 +15,37 @@ uvx agentq init
 uvx agentq run --web
 ```
 
-No configuration is required: `init` writes the detected defaults for editing,
-while `doctor` explains what would run. `--telegram` starts the Telegram front;
-the default folder front reads `.agentq/inbox/` and writes `.agentq/outbox/`.
+In a terminal, `init` asks for one AI agent, the target environment, the current
+objective and whether external actions require approval. It saves those answers
+in `agentq.toml`; both fixer and reviewer receive them as standing context. For
+automation, the same setup is available without prompts:
+
+```bash
+agentq init --agent codex --environment local --work-mode development \
+  --project-summary "build the customer API" --non-interactive
+```
+
+`--agent` is the readable alias for `--backend` and selects both roles;
+`--fixer-agent` and `--reviewer-agent` select them separately. These flags also
+work with `run` and `once`. `doctor` explains what would run. `--telegram`
+starts the Telegram front; the default folder front reads `.agentq/inbox/` and
+writes `.agentq/outbox/`. If a task still lacks information that would change
+the implementation or risk external state, the fixer returns only the blocking
+questions instead of guessing.
+
+The same initialization is available while AgentQ is running. Open **Project
+setup** in the Web sidebar, or send `/init` to the Telegram bot. Both interfaces
+show validation, config write and live activation progress; no runner restart is
+needed. In Telegram, live fixer/reviewer output is updated in one status message
+instead of producing a message for every event. Send `/cancel` to leave the bot
+wizard without changing the configuration.
+
+Every task is also a durable discussion thread. In Web, select a task and use
+**Comment** to store context without running an agent, or **Send to agent** to
+queue a follow-up. Telegram exposes the same actions as `/comment ID TEXT` and
+`/message ID TEXT`. Follow-ups reopen terminal tasks under the same task id,
+retain prior run results, and resume that task's backend session when possible;
+after a restart the on-disk thread remains the fallback source of context.
 
 To share the web front temporarily, install and authenticate ngrok, then let
 AgentQ own the tunnel:
@@ -48,6 +76,11 @@ Only one runner may own a repository at a time. Its OS-level lease contains the
 run id, process id, host and start time. After an unclean stop, the next runner
 requeues tasks left in fixer/review states while preserving their previous
 attempt branches for diagnosis.
+
+Messages received while the fixer is working are applied before checks. A
+message received during review invalidates that verdict and returns the task to
+the fixer. Approved delivery is immutable: messages arriving during delivery
+wait for the next attempt instead of changing the reviewed commit.
 
 The reviewer uses the same agent worktree with a read-only policy requested
 from its backend. The strength of that policy and of push/network restrictions
@@ -134,6 +167,13 @@ max_usd = 0.0               # 0 disables the task-wide USD limit
 strict_security = false      # require native reviewer isolation and push denial
 process = ""                # optional app process to restart after local merge
 
+[project]
+environment = "local"       # local | staging | production
+work_mode = "development"   # development | maintenance | incident
+summary = "build the customer API"
+external_actions = "forbid" # forbid | ask before changing external systems
+constraints = ["do not use production data"]
+
 [agents]
 backend_order = ["claude", "codex", "opencode"]
 
@@ -162,7 +202,9 @@ max_sse_clients = 16
 
 Scalar settings can also be supplied as `AGENTQ_<KEY>`. Role settings use
 `AGENTQ_FIXER_<KEY>` and `AGENTQ_REVIEWER_<KEY>`. Keep credentials in the
-environment rather than in `agentq.toml`.
+environment rather than in `agentq.toml`. Project context can be overridden by
+`AGENTQ_PROJECT_ENVIRONMENT`, `AGENTQ_PROJECT_WORK_MODE`,
+`AGENTQ_PROJECT_SUMMARY`, and `AGENTQ_PROJECT_EXTERNAL_ACTIONS`.
 
 Useful commands:
 

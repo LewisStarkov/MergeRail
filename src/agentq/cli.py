@@ -12,7 +12,7 @@ from . import checks, log
 from .audit import AuditLog
 from .backends import BackendInfo, BackendRegistry
 from .backends.policy import strict_security_gaps
-from .config import CONFIG_NAME, Config, render_config
+from .config import CONFIG_NAME, Config, ensure_state_ignored, write_config
 from .delivery import LOCAL, can_open_pr, resolve_mode
 from .gitctl import current_branch, has_commits, is_repo, repo_root
 from .runner import Runner
@@ -45,6 +45,18 @@ COMMANDS = (
     "events",
     "once",
 )
+
+
+def _add_agent_flags(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--backend", "--agent", dest="backend", default="", help="backend for both agents"
+    )
+    command.add_argument(
+        "--fixer-backend", "--fixer-agent", dest="fixer_backend", default=""
+    )
+    command.add_argument(
+        "--reviewer-backend", "--reviewer-agent", dest="reviewer_backend", default=""
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,9 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--once", action="store_true", help="handle one task, then exit")
     run.add_argument("--delivery", default="", choices=["", "auto", "local", "merge", "pr"])
-    run.add_argument("--backend", default="", help="backend for both agents")
-    run.add_argument("--fixer-backend", default="")
-    run.add_argument("--reviewer-backend", default="")
+    _add_agent_flags(run)
     run.add_argument("--model", default="", help="model for both agents")
     run.add_argument("--no-process", action="store_true", help="do not run the configured app")
     run.add_argument(
@@ -105,7 +115,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="allow a non-local web bind without authentication",
     )
 
-    commands.add_parser("init", parents=[common], help="write agentq.toml")
+    initialize = commands.add_parser(
+        "init", parents=[common], help="ask about the project and write agentq.toml"
+    )
+    _add_agent_flags(initialize)
+    initialize.add_argument(
+        "--environment", choices=["local", "staging", "production"], default=""
+    )
+    initialize.add_argument(
+        "--work-mode", choices=["development", "maintenance", "incident"], default=""
+    )
+    initialize.add_argument("--project-summary", default="")
+    initialize.add_argument("--external-actions", choices=["forbid", "ask"], default="")
+    initialize.add_argument("--constraint", action="append", default=[])
+    initialize.add_argument(
+        "--non-interactive", action="store_true", help="write defaults and supplied flags"
+    )
 
     doctor = commands.add_parser("doctor", parents=[common], help="preflight report")
     doctor.add_argument(
@@ -152,9 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     once.add_argument(
         "--delivery", default="", choices=["", "auto", "local", "merge", "pr"]
     )
-    once.add_argument("--backend", default="", help="backend for both agents")
-    once.add_argument("--fixer-backend", default="")
-    once.add_argument("--reviewer-backend", default="")
+    _add_agent_flags(once)
     once.add_argument("--model", default="", help="model for both agents")
     once.add_argument("--dangerous", action="store_true")
     once.add_argument("--strict-security", action="store_true")
@@ -183,6 +206,17 @@ def resolve(args: argparse.Namespace) -> Config:
         config.fixer.backend = args.fixer_backend
     if getattr(args, "reviewer_backend", ""):
         config.reviewer.backend = args.reviewer_backend
+    if getattr(args, "environment", ""):
+        config.project.environment = args.environment
+    if getattr(args, "work_mode", ""):
+        config.project.work_mode = args.work_mode
+    if getattr(args, "project_summary", ""):
+        config.project.summary = args.project_summary.strip()
+    if getattr(args, "external_actions", ""):
+        config.project.external_actions = args.external_actions
+    for constraint in getattr(args, "constraint", []):
+        if text := constraint.strip():
+            config.project.constraints.append(text)
     if getattr(args, "dangerous", False):
         config.permission = "skip"
         config.fixer.permission = "skip"
@@ -217,6 +251,7 @@ def doctor(config: Config, *, run_checks: bool = False) -> int:
     lines = [
         f"repository   {config.root}",
         f"base branch  {config.base_branch} (checked out: {checked_out})",
+        f"context      {config.project.environment} / {config.project.work_mode}",
         f"delivery     {config.delivery}  ({delivery_detail})",
         f"conventions  {', '.join(config.conventions) or 'none found'}",
         f"worktree     {config.worktree}",
@@ -306,30 +341,72 @@ def _strict_security_errors(
     return errors
 
 
-def init(config: Config) -> int:
+def init(config: Config, *, interactive: bool = False) -> int:
     target = config.root / CONFIG_NAME
     if target.exists():
         print(f"agentq: {target} already exists — leaving it alone")
     else:
-        target.write_text(render_config(config), encoding="utf-8")
+        if interactive:
+            _init_wizard(config)
+        write_config(config)
         print(f"agentq: wrote {target}")
     ensure_ignored(config.root)
     return 0
 
 
+def _init_wizard(config: Config) -> None:
+    print("agentq: initial setup (press Enter to accept each default)")
+    backends = list(
+        dict.fromkeys(
+            [
+                "auto",
+                *config.backend_registry().names(),
+                config.fixer.backend,
+                config.reviewer.backend,
+            ]
+        )
+    )
+    if config.fixer.backend == config.reviewer.backend:
+        shared = _ask_choice("Agent", backends, config.fixer.backend)
+        config.fixer.backend = shared
+        config.reviewer.backend = shared
+    config.project.environment = _ask_choice(
+        "Target environment",
+        ["local", "staging", "production"],
+        config.project.environment,
+    )
+    config.project.summary = _ask_text(
+        "What are we building or working on now", config.project.summary
+    )
+    config.project.external_actions = _ask_choice(
+        "External actions (forbid=never, ask=request approval)",
+        ["forbid", "ask"],
+        config.project.external_actions,
+    )
+
+
+def _ask_choice(label: str, choices: list[str], default: str) -> str:
+    options = "/".join(choices)
+    while True:
+        answer = _ask_text(f"{label} ({options})", default)
+        if answer in choices:
+            return answer
+        print(f"agentq: choose one of: {', '.join(choices)}")
+
+
+def _ask_text(label: str, default: str = "") -> str:
+    suffix = f" [{default}]" if default else ""
+    try:
+        answer = input(f"{label}{suffix}: ").strip()
+    except EOFError:
+        return default
+    return answer or default
+
+
 def ensure_ignored(root: Path) -> None:
     """State does not belong in history; say so once in .gitignore."""
-    path = root / ".gitignore"
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        text = ""
-    if any(line.strip().rstrip("/") == ".agentq" for line in text.splitlines()):
-        return
-    lead = "" if not text or text.endswith("\n") else "\n"
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"{lead}.agentq/\n")
-    print("agentq: added .agentq/ to .gitignore")
+    if ensure_state_ignored(root):
+        print("agentq: added .agentq/ to .gitignore")
 
 
 def add(config: Config, text: str) -> int:
@@ -528,7 +605,10 @@ def main(argv: list[str] | None = None) -> int:
     config = resolve(args)
 
     if args.command == "init":
-        return init(config)
+        interactive = not args.non_interactive and bool(
+            getattr(sys.stdin, "isatty", lambda: False)()
+        )
+        return init(config, interactive=interactive)
     if args.command == "doctor":
         return doctor(config, run_checks=args.run_checks)
     if args.command == "add":
@@ -554,13 +634,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "once":
         return once(config, " ".join(args.text))
 
-    if not preflight(config):
-        return 1
     front = args.front or (
         "telegram" if args.telegram else "web" if args.web or args.share else "folder"
     )
+    ready = preflight(config)
+    allows_setup = front in {"web", "telegram"}
+    if not ready and not allows_setup:
+        return 1
     share = _share(args, config, front)
-    runner = Runner(config, front, supervise=not args.no_process, share=share)
+    runner = Runner(
+        config,
+        front,
+        supervise=not args.no_process,
+        share=share,
+        allow_setup=allows_setup,
+    )
 
     def stop(*_: object) -> None:
         log.info("agentq.stopping")

@@ -18,7 +18,9 @@ belongs in its own section of ``agentq.toml``, reachable via ``config.front``.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 from ..tasks import Task, TaskStore
 
@@ -35,6 +37,19 @@ class StreamEvent:
     text: str = ""
 
 
+SetupProgress = Callable[[str, str], None]
+
+
+class SetupController(Protocol):
+    """Runner-owned project setup exposed by interactive fronts."""
+
+    def setup_snapshot(self) -> dict[str, Any]: ...
+
+    def apply_setup(
+        self, payload: Mapping[str, object], progress: SetupProgress
+    ) -> tuple[int, dict[str, Any]]: ...
+
+
 class Front:
     """Base class and the contract: implement ``report``, get everything else."""
 
@@ -43,6 +58,11 @@ class Front:
 
     def __init__(self, store: TaskStore) -> None:
         self.store = store
+        self.setup_controller: SetupController | None = None
+
+    def bind_setup(self, controller: SetupController) -> None:
+        """Attach setup after the runner and front have both been constructed."""
+        self.setup_controller = controller
 
     # --- lifecycle -------------------------------------------------------
 
@@ -65,4 +85,4 @@ class Front:
         """Publish transient progress when the front supports live updates."""
 
 
-__all__ = ["EVENTS", "Front", "StreamEvent"]
+__all__ = ["EVENTS", "Front", "SetupController", "SetupProgress", "StreamEvent"]

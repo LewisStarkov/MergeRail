@@ -1,5 +1,34 @@
 # Operations
 
+## Initial operating context
+
+Run `agentq init` in an interactive terminal before the first task. The short
+wizard records one agent for both roles, target environment, current objective
+and external-action policy. Both agents receive the resulting `[project]`
+section in their system prompt, so a
+production incident is not treated like an ordinary local refactor.
+
+For scripts and reproducible setup, pass the same answers as flags and suppress
+questions explicitly:
+
+```bash
+agentq init --agent codex --reviewer-agent claude \
+  --environment production --work-mode incident \
+  --project-summary "restore payment processing" \
+  --external-actions ask --constraint "preserve audit logs" \
+  --non-interactive
+```
+
+Context is an instruction and does not expand agent permissions. In particular,
+it never grants deployment, push, messaging or production-write authority.
+
+The Web front exposes the same four fields under **Project setup** and streams
+each setup stage over its existing SSE connection. The Telegram front provides a
+four-step `/init` dialog; `/cancel` abandons it. A successful setup is written
+atomically and activated for the next task without restarting the runner. Setup
+is rejected while a task is active so its agents and operating context cannot
+change midway through a run.
+
 ## Recovery and cancellation
 
 AgentQ takes `.agentq/runner.lock` before baseline checks or front startup. A
@@ -20,6 +49,14 @@ Queue updates are serialized across processes and replaced atomically. Invalid
 JSON stops mutations and is copied to a timestamped `tasks.corrupt-*.json` file
 for inspection. Fix the original queue or restore a known-good copy, then run
 `agentq doctor` before restarting the runner.
+
+Task discussions are append-only journals under `.agentq/threads/`. Message
+status changes are appended as events and folded on read, so an interrupted
+runner can return `processing` messages to `pending` without rewriting the
+thread. Resumable backend session ids and previous execution snapshots live in
+the task record; session ids are task-scoped and are discarded if a backend
+rotates its context or rejects resume. The journal is then used to reconstruct
+the request in a fresh session.
 
 The audit journal rotates at 5 MiB and keeps three backups by default. Task
 history can be compacted without losing terminal records:

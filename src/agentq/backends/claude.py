@@ -66,7 +66,7 @@ class _ClaudeConversation:
         self.spec = spec
         self.setting_sources = setting_sources
         self.events = events or NullEventSink()
-        self.session_id: str | None = None
+        self.session_id = spec.resume_session_id
         self.context_tokens = 0
         self._controller = ProcessController()
 
@@ -83,7 +83,7 @@ class _ClaudeConversation:
             "stream-json",
             "--verbose",
         ]
-        if self.spec.system_prompt:
+        if self.spec.system_prompt and self.session_id is None:
             args += ["--append-system-prompt", self.spec.system_prompt]
         if self.spec.permission == "skip":
             args.append("--dangerously-skip-permissions")
@@ -134,9 +134,7 @@ class _ClaudeConversation:
         if result.timed_out:
             log.error("agent.timeout", backend="claude", role=self.role, seconds=self.spec.timeout)
         if final is None:
-            log.error(
-                "agent.no_result", backend="claude", role=self.role, code=result.returncode
-            )
+            log.error("agent.no_result", backend="claude", role=self.role, code=result.returncode)
             reason = log.clip(result.stderr, 500) or "the agent produced no result"
             return AgentReply(reason, True, None, 0, result.seconds)
         return self._absorb(final, turn_usage, result.seconds)
@@ -151,6 +149,9 @@ class _ClaudeConversation:
         structured = result.get("structured_output")
         raw_cost = result.get("total_cost_usd")
         cost = float(raw_cost) if isinstance(raw_cost, int | float) else None
+        if context >= self.spec.context_limit:
+            log.warn("agent.rotated", backend="claude", role=self.role, context=context)
+            self.session_id = None
         reply = AgentReply(
             text=str(result.get("result") or ""),
             is_error=bool(result.get("is_error")),
@@ -169,9 +170,6 @@ class _ClaudeConversation:
             cost=round(cost, 3) if cost is not None else None,
             seconds=round(seconds),
         )
-        if context >= self.spec.context_limit:
-            log.warn("agent.rotated", backend="claude", role=self.role, context=context)
-            self.session_id = None
         return reply
 
     def _on_event(self, event: dict[str, Any]) -> None:
@@ -273,9 +271,7 @@ class ClaudeBackend:
             pass
         return BackendInfo(self.name, True, version, claude_capabilities())
 
-    def open_session(
-        self, spec: SessionSpec, events: EventSink | None = None
-    ) -> AgentSession:
+    def open_session(self, spec: SessionSpec, events: EventSink | None = None) -> AgentSession:
         setting_sources = spec.settings.get("setting_sources", "project")
         return ClaudeSession(
             spec,
