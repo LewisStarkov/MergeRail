@@ -23,6 +23,40 @@ check manually, `agentq update` to install immediately, or `--no-update` /
 `AGENTQ_AUTO_UPDATE=0` to disable the automatic check. A fork can set
 `AGENTQ_UPDATE_REPOSITORY` to its Git URL.
 
+## Let your coding agent start AgentQ
+
+Paste this prompt into Codex, Claude Code, OpenCode, or another coding agent
+that can use a terminal:
+
+```text
+Set up and start AgentQ for the Git repository in the current working directory.
+
+Preserve every existing file, uncommitted change, branch, agentq.toml setting,
+and .agentq/ state. Do not reset, clean, checkout, commit, or push anything.
+
+1. Confirm that the current directory is a Git repository. Inspect its README
+   and package manifests to infer a short project summary.
+2. Confirm that `uv` is available. If it is, install AgentQ with
+   `uv tool install agentq`, or run `agentq update` when AgentQ is already
+   installed. If `uv` is unavailable, use its official installation method only
+   when the environment permits it; otherwise report the exact blocker.
+3. If agentq.toml does not exist, run:
+   `agentq init --agent auto --environment local --work-mode development
+   --project-summary "<inferred summary>" --external-actions forbid
+   --non-interactive`
+   Do not replace an existing agentq.toml.
+4. Run `agentq doctor` and safely resolve any local setup issue that does not
+   require credentials or a user decision.
+5. Start `agentq run --web` in a persistent terminal session. Do not start a
+   duplicate runner when AgentQ already owns the repository. Wait until the Web
+   UI is listening, report its local URL, and keep the process running.
+
+Keep the Web UI local. Do not use --share, --share-unsafe, or --unsafe-expose
+unless I explicitly request public access. If permissions, authentication, or a
+material configuration choice blocks startup, ask one concise question and
+include the command output that caused the block.
+```
+
 In a terminal, `init` asks for one AI agent, the target environment, the current
 objective and whether external actions require approval. It saves those answers
 in `agentq.toml`; both fixer and reviewer receive them as standing context. For
