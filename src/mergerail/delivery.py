@@ -348,7 +348,7 @@ def open_pull_request(
             "--head",
             branch,
             "--title",
-            log.clip(task.title or f"agentq #{task.id}", 120),
+            log.clip(task.title or f"mergerail #{task.id}", 120),
             "--body",
             body,
         ],
@@ -385,7 +385,7 @@ def pr_body(task: Task, summary: str, review: str) -> str:
         f"## What changed\n\n{summary or '(no summary)'}\n\n"
         f"## Review\n\nAn adversarial reviewer read this diff with the check results in hand "
         f"and approved it:\n\n{review or '(no review recorded)'}\n\n"
-        f"---\nOpened by agentq — the checks already passed locally on this commit."
+        f"---\nOpened by mergerail — the checks already passed locally on this commit."
     )
 
 

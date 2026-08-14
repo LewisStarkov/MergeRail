@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from agentq import update
-from agentq.audit import AuditLog
-from agentq.backends.registry import BackendRegistry
-from agentq.cli import _share, build_parser, main, resolve
-from agentq.config import Config
-from agentq.fronts import make_front
-from agentq.share import NgrokTunnel
-from agentq.tasks import Status, TaskStore
+from mergerail import update
+from mergerail.audit import AuditLog
+from mergerail.backends.registry import BackendRegistry
+from mergerail.cli import _share, build_parser, main, resolve
+from mergerail.config import Config
+from mergerail.fronts import make_front
+from mergerail.share import NgrokTunnel
+from mergerail.tasks import Status, TaskStore
 from tests.fake_front import EchoFront
 
 
@@ -24,7 +24,7 @@ def test_add_then_list(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["list", "--path", str(repo)]) == 0
     assert "fix the header" in capsys.readouterr().out
 
-    store = TaskStore(repo / ".agentq" / "tasks.json")
+    store = TaskStore(repo / ".mergerail" / "tasks.json")
     (task,) = store.load()
     assert task.text == "fix the header"
     assert task.source == "cli"
@@ -116,13 +116,13 @@ def test_ngrok_share_flags_are_not_silently_ignored(repo: Path) -> None:
 def test_backends_lists_an_explicit_external_driver(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         "[backends.fixture]\n"
-        'protocol = "agentq-jsonl-v1"\n'
+        'protocol = "mergerail-jsonl-v1"\n'
         f"command = [{json.dumps(sys.executable)}]\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("agentq.config.default_registry", BackendRegistry)
+    monkeypatch.setattr("mergerail.config.default_registry", BackendRegistry)
 
     assert main(["backends", "--path", str(repo)]) == 0
     output = capsys.readouterr().out
@@ -131,11 +131,11 @@ def test_backends_lists_an_explicit_external_driver(
 
 
 def test_invalid_external_backend_config_has_no_traceback(repo: Path) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         '[backends.fixture]\ncommand = ["fixture"]\n', encoding="utf-8"
     )
 
-    with pytest.raises(SystemExit, match=r"invalid agentq.toml.*agentq-jsonl-v1"):
+    with pytest.raises(SystemExit, match=r"invalid mergerail.toml.*mergerail-jsonl-v1"):
         main(["backends", "--path", str(repo)])
 
 
@@ -147,7 +147,7 @@ def test_show_includes_recoverable_delivery_details(
     task = store.add("ship this")
     store.approve(
         task.id,
-        branch="agentq/1/a1",
+        branch="mergerail/1/a1",
         commit="abc123",
         requested_mode="pr",
         base_branch="main",
@@ -157,7 +157,7 @@ def test_show_includes_recoverable_delivery_details(
 
     assert main(["show", str(task.id), "--path", str(repo)]) == 0
     output = capsys.readouterr().out
-    assert "agentq/1/a1" in output
+    assert "mergerail/1/a1" in output
     assert "abc123" in output
     assert "blocked (push)" in output
     assert "origin refused" in output
@@ -174,7 +174,7 @@ def test_retry_delivery_requeues_only_the_approved_commit(
     task = store.add("ship this")
     store.approve(
         task.id,
-        branch="agentq/1/a1",
+        branch="mergerail/1/a1",
         commit="abc123",
         requested_mode="pr",
         base_branch="main",
@@ -187,7 +187,7 @@ def test_retry_delivery_requeues_only_the_approved_commit(
     assert retried is not None
     assert retried.status == Status.APPROVED
     assert retried.approved_sha == "abc123"
-    assert retried.branch == "agentq/1/a1"
+    assert retried.branch == "mergerail/1/a1"
     assert "commit abc123" in capsys.readouterr().out
 
     waiting = store.add("not approved")
@@ -201,14 +201,14 @@ def test_retry_task_preserves_the_previous_branch(
     config = Config.load(repo)
     store = TaskStore(config.queue_path)
     task = store.add("try again")
-    store.update(task.id, status=Status.FAILED, branch="agentq/1/a1", note="failed")
+    store.update(task.id, status=Status.FAILED, branch="mergerail/1/a1", note="failed")
 
     assert main(["retry-task", str(task.id), "--path", str(repo)]) == 0
     retried = store.get(task.id)
     assert retried is not None
     assert retried.status == Status.NEW
     assert retried.branch is None
-    assert retried.previous_branches == ["agentq/1/a1"]
+    assert retried.previous_branches == ["mergerail/1/a1"]
     assert "previous branches were preserved" in capsys.readouterr().out
 
     assert main(["retry-task", str(task.id), "--path", str(repo)]) == 1
@@ -243,8 +243,8 @@ def test_init_writes_config_and_ignores_the_state(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert main(["init", "--path", str(repo)]) == 0
-    assert (repo / "agentq.toml").exists()
-    assert ".agentq/" in (repo / ".gitignore").read_text(encoding="utf-8")
+    assert (repo / "mergerail.toml").exists()
+    assert ".mergerail/" in (repo / ".gitignore").read_text(encoding="utf-8")
 
     # Running it again must neither duplicate the ignore line nor touch the file.
     before = (repo / ".gitignore").read_text(encoding="utf-8")
@@ -329,7 +329,7 @@ def test_outside_a_repository_it_refuses_plainly(tmp_path: Path) -> None:
 
 
 def test_bare_flags_still_mean_run(repo: Path) -> None:
-    # `agentq --telegram` predates subcommands and must keep working; without a
+    # `mergerail --telegram` predates subcommands and must keep working; without a
     # token it exits with the message that says exactly what is missing.
     with pytest.raises(SystemExit, match="no Telegram token"):
         main(["--telegram", "--path", str(repo)])

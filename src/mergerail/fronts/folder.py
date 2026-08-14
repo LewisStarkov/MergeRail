@@ -1,7 +1,7 @@
 """A front made of files, for everywhere a chat does not reach.
 
-Drop a ``.md`` or ``.txt`` file into ``.agentq/inbox/`` and it becomes a task;
-the outcome is written to ``.agentq/outbox/<id>.md``. That is enough to drive
+Drop a ``.md`` or ``.txt`` file into ``.mergerail/inbox/`` and it becomes a task;
+the outcome is written to ``.mergerail/outbox/<id>.md``. That is enough to drive
 this tool from cron, from CI, from a web form that writes a file, or from a
 person with an editor — and it is the front that needs no credentials at all,
 which makes it the honest default.

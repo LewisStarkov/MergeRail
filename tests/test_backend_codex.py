@@ -5,9 +5,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from agentq.backends import codex
-from agentq.backends.base import SessionSpec, TurnRequest
-from agentq.backends.process import JsonlProcessResult
+from mergerail.backends import codex
+from mergerail.backends.base import SessionSpec, TurnRequest
+from mergerail.backends.process import JsonlProcessResult
 
 
 def result(*events: dict[str, Any], returncode: int = 0, stderr: str = "") -> JsonlProcessResult:

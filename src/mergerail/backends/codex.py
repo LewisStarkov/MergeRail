@@ -118,7 +118,7 @@ class CodexSession:
         if request.schema is None:
             result = self._run(self.command(prompt))
         else:
-            with tempfile.TemporaryDirectory(prefix="agentq-codex-") as directory:
+            with tempfile.TemporaryDirectory(prefix="mergerail-codex-") as directory:
                 schema_path = Path(directory) / "output-schema.json"
                 schema_path.write_text(json.dumps(request.schema), encoding="utf-8")
                 result = self._run(self.command(prompt, schema_path=schema_path))

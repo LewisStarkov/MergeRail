@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from agentq.config import Config, render_config
-from agentq.detect import convention_files, detect_checks
-from agentq.fronts import make_front
-from agentq.fronts.web import WebFront
-from agentq.tasks import TaskStore
+from mergerail.config import Config, render_config
+from mergerail.detect import convention_files, detect_checks
+from mergerail.fronts import make_front
+from mergerail.fronts.web import WebFront
+from mergerail.tasks import TaskStore
 
 
 def test_python_project_is_detected(repo: Path) -> None:
@@ -22,7 +22,7 @@ def test_python_project_is_detected(repo: Path) -> None:
 
 
 def test_node_scripts_become_checks(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agentq.detect.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("mergerail.detect.shutil.which", lambda name: f"/usr/bin/{name}")
     (repo / "package.json").write_text(
         json.dumps({"scripts": {"lint": "eslint .", "test": "vitest", "dev": "next dev"}}),
         encoding="utf-8",
@@ -66,7 +66,7 @@ def test_a_tool_table_counts_as_declared(repo: Path) -> None:
 
 
 def test_jest_gets_no_flag_it_would_refuse(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agentq.detect.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("mergerail.detect.shutil.which", lambda name: f"/usr/bin/{name}")
     (repo / "package.json").write_text(
         json.dumps({"scripts": {"test": "jest"}, "devDependencies": {"jest": "^29"}}),
         encoding="utf-8",
@@ -84,13 +84,13 @@ def test_conventions_are_the_files_that_exist(repo: Path) -> None:
 def test_config_defaults_to_the_repository(repo: Path) -> None:
     config = Config.load(repo)
     assert config.base_branch == "main"
-    assert config.state_dir == repo / ".agentq"
-    assert config.queue_path == repo / ".agentq" / "tasks.json"
+    assert config.state_dir == repo / ".mergerail"
+    assert config.queue_path == repo / ".mergerail" / "tasks.json"
     assert config.delivery == "auto"
 
 
 def test_config_file_overrides_detection(repo: Path) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         '\n'.join(
             [
                 'base_branch = "trunk"',
@@ -116,10 +116,10 @@ def test_config_file_overrides_detection(repo: Path) -> None:
 
 
 def test_web_front_loads_auth_and_resource_limits(repo: Path) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         "[web]\n"
         'host = "0.0.0.0"\n'
-        'username = "agentq"\n'
+        'username = "mergerail"\n'
         'password = "secret"\n'
         "session_ttl = 60\n"
         "max_sse_clients = 3\n",
@@ -134,16 +134,16 @@ def test_web_front_loads_auth_and_resource_limits(repo: Path) -> None:
 
 
 def test_environment_wins_over_the_file(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (repo / "agentq.toml").write_text('delivery = "pr"\n', encoding="utf-8")
-    monkeypatch.setenv("AGENTQ_DELIVERY", "merge")
-    monkeypatch.setenv("AGENTQ_MODEL", "opus")
+    (repo / "mergerail.toml").write_text('delivery = "pr"\n', encoding="utf-8")
+    monkeypatch.setenv("MERGERAIL_DELIVERY", "merge")
+    monkeypatch.setenv("MERGERAIL_MODEL", "opus")
     config = Config.load(repo)
     assert config.delivery == "merge"
     assert config.model == "opus"
 
 
 def test_agent_sections_and_external_backend_are_loaded(repo: Path) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         "\n".join(
             [
                 "[agents]",
@@ -163,7 +163,7 @@ def test_agent_sections_and_external_backend_are_loaded(repo: Path) -> None:
                 'permission = "review"',
                 "timeout = 300",
                 "[backends.gemini]",
-                'protocol = "agentq-jsonl-v1"',
+                'protocol = "mergerail-jsonl-v1"',
                 f"command = {json.dumps([sys.executable, '-m', 'gemini_driver'])}",
             ]
         ),
@@ -192,7 +192,7 @@ def test_agent_sections_and_external_backend_are_loaded(repo: Path) -> None:
     assert reviewer.read_only
 
 
-@pytest.mark.parametrize("protocol", [None, "agentq-jsonl-v2"])
+@pytest.mark.parametrize("protocol", [None, "mergerail-jsonl-v2"])
 def test_external_backend_requires_the_jsonl_v1_protocol(
     repo: Path, protocol: str | None
 ) -> None:
@@ -200,15 +200,15 @@ def test_external_backend_requires_the_jsonl_v1_protocol(
     if protocol is not None:
         lines.append(f'protocol = "{protocol}"')
     lines.append(f"command = {json.dumps([sys.executable, '-m', 'gemini_driver'])}")
-    (repo / "agentq.toml").write_text("\n".join(lines), encoding="utf-8")
+    (repo / "mergerail.toml").write_text("\n".join(lines), encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"gemini.*agentq-jsonl-v1"):
+    with pytest.raises(ValueError, match=r"gemini.*mergerail-jsonl-v1"):
         Config.load(repo)
 
 
 def test_external_backend_requires_a_command(repo: Path) -> None:
-    (repo / "agentq.toml").write_text(
-        '[backends.gemini]\nprotocol = "agentq-jsonl-v1"\n', encoding="utf-8"
+    (repo / "mergerail.toml").write_text(
+        '[backends.gemini]\nprotocol = "mergerail-jsonl-v1"\n', encoding="utf-8"
     )
 
     with pytest.raises(ValueError, match=r"gemini.*non-empty command"):
@@ -216,31 +216,31 @@ def test_external_backend_requires_a_command(repo: Path) -> None:
 
 
 def test_unknown_delivery_mode_is_rejected(repo: Path) -> None:
-    (repo / "agentq.toml").write_text('delivery = "surprise"\n', encoding="utf-8")
+    (repo / "mergerail.toml").write_text('delivery = "surprise"\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="unknown delivery mode"):
         Config.load(repo)
 
 
 def test_malformed_config_is_not_silently_ignored(repo: Path) -> None:
-    path = repo / "agentq.toml"
+    path = repo / "mergerail.toml"
     path.write_text("delivery = [", encoding="utf-8")
-    with pytest.raises(ValueError, match=r"cannot parse .*agentq\.toml"):
+    with pytest.raises(ValueError, match=r"cannot parse .*mergerail\.toml"):
         Config.load(repo)
 
 
 def test_role_specific_agent_environment_overrides_the_file(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         "[agents.fixer]\nbackend = 'claude'\n[agents.reviewer]\nbackend = 'claude'\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("AGENTQ_FIXER_BACKEND", "codex")
-    monkeypatch.setenv("AGENTQ_FIXER_MODEL", "gpt-test")
-    monkeypatch.setenv("AGENTQ_FIXER_TIMEOUT", "123")
-    monkeypatch.setenv("AGENTQ_REVIEWER_BACKEND", "opencode")
-    monkeypatch.setenv("AGENTQ_REVIEWER_PERMISSION", "review")
+    monkeypatch.setenv("MERGERAIL_FIXER_BACKEND", "codex")
+    monkeypatch.setenv("MERGERAIL_FIXER_MODEL", "gpt-test")
+    monkeypatch.setenv("MERGERAIL_FIXER_TIMEOUT", "123")
+    monkeypatch.setenv("MERGERAIL_REVIEWER_BACKEND", "opencode")
+    monkeypatch.setenv("MERGERAIL_REVIEWER_PERMISSION", "review")
 
     config = Config.load(repo)
     assert config.fixer.backend == "codex"
@@ -251,36 +251,36 @@ def test_role_specific_agent_environment_overrides_the_file(
 
 
 def test_state_dir_env_wins_over_the_file_too(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (repo / "agentq.toml").write_text('state_dir = "from-file"\n', encoding="utf-8")
-    monkeypatch.setenv("AGENTQ_STATE_DIR", "from-env")
+    (repo / "mergerail.toml").write_text('state_dir = "from-file"\n', encoding="utf-8")
+    monkeypatch.setenv("MERGERAIL_STATE_DIR", "from-env")
     assert Config.load(repo).state_dir == repo / "from-env"
 
 
 def test_baseline_checks_reads_a_boolean_from_the_environment(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("AGENTQ_BASELINE_CHECKS", "false")
+    monkeypatch.setenv("MERGERAIL_BASELINE_CHECKS", "false")
     assert Config.load(repo).baseline_checks is False
 
 
 def test_baseline_mode_and_strict_security_are_configurable(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         'baseline_mode = "compare"\nstrict_security = true\n', encoding="utf-8"
     )
     config = Config.load(repo)
     assert config.baseline_mode == "compare"
     assert config.strict_security
 
-    monkeypatch.setenv("AGENTQ_BASELINE_MODE", "strict")
+    monkeypatch.setenv("MERGERAIL_BASELINE_MODE", "strict")
     assert Config.load(repo).baseline_mode == "strict"
 
 
 def test_project_context_is_loaded_validated_and_overridden(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         "[project]\n"
         'environment = "staging"\n'
         'work_mode = "maintenance"\n'
@@ -295,15 +295,15 @@ def test_project_context_is_loaded_validated_and_overridden(
     assert config.project.summary == "prepare the release"
     assert config.project.constraints == ["no schema changes"]
 
-    monkeypatch.setenv("AGENTQ_PROJECT_ENVIRONMENT", "production")
-    monkeypatch.setenv("AGENTQ_PROJECT_WORK_MODE", "incident")
+    monkeypatch.setenv("MERGERAIL_PROJECT_ENVIRONMENT", "production")
+    monkeypatch.setenv("MERGERAIL_PROJECT_WORK_MODE", "incident")
     overridden = Config.load(repo)
     assert overridden.project.environment == "production"
     assert overridden.project.work_mode == "incident"
 
 
 def test_unknown_project_context_value_is_rejected(repo: Path) -> None:
-    (repo / "agentq.toml").write_text(
+    (repo / "mergerail.toml").write_text(
         '[project]\nenvironment = "somewhere"\n', encoding="utf-8"
     )
     with pytest.raises(ValueError, match="unknown project environment"):
@@ -311,7 +311,7 @@ def test_unknown_project_context_value_is_rejected(repo: Path) -> None:
 
 
 def test_unknown_baseline_mode_is_rejected(repo: Path) -> None:
-    (repo / "agentq.toml").write_text('baseline_mode = "guess"\n', encoding="utf-8")
+    (repo / "mergerail.toml").write_text('baseline_mode = "guess"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="unknown baseline mode"):
         Config.load(repo)
 
@@ -341,7 +341,7 @@ def test_rendered_config_is_loadable(repo: Path, tmp_path: Path) -> None:
     config.project.summary = 'release "blue" safely'
     config.project.external_actions = "ask"
     config.project.constraints = ["preserve data", "no downtime"]
-    (repo / "agentq.toml").write_text(render_config(config), encoding="utf-8")
+    (repo / "mergerail.toml").write_text(render_config(config), encoding="utf-8")
     again = Config.load(repo)
     assert again.base_branch == config.base_branch
     assert [check.command for check in again.checks] == [check.command for check in config.checks]

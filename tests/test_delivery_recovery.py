@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-import agentq.delivery as delivery
-from agentq.gitctl import Worktree, git
-from agentq.tasks import DeliveryRecord, Task
+import mergerail.delivery as delivery
+from mergerail.gitctl import Worktree, git
+from mergerail.tasks import DeliveryRecord, Task
 
 
-def approved_task(*, commit: str, branch: str = "agentq/1/a1", mode: str = "local") -> Task:
+def approved_task(*, commit: str, branch: str = "mergerail/1/a1", mode: str = "local") -> Task:
     return Task(
         id=1,
         text="ship it",
@@ -32,17 +32,17 @@ def approved_task(*, commit: str, branch: str = "agentq/1/a1", mode: str = "loca
 
 def test_local_delivery_recovers_after_merge_completed(repo: Path, tmp_path: Path) -> None:
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1/a1", "main")
+    worktree.reset("mergerail/1/a1", "main")
     (worktree.path / "one.txt").write_text("done", encoding="utf-8")
     worktree.commit_all("work")
     approved = worktree.head()
-    first = delivery.merge_into_base(repo, "agentq/1/a1", "main", commit=approved)
+    first = delivery.merge_into_base(repo, "mergerail/1/a1", "main", commit=approved)
     assert first.ok
 
     # Simulate cleanup plus a crash before TaskStore.complete_delivery(). The
     # immutable SHA, not the task branch, is enough to recognize success.
     worktree.detach("main")
-    git("branch", "-D", "agentq/1/a1", cwd=repo)
+    git("branch", "-D", "mergerail/1/a1", cwd=repo)
     recovered = delivery.recover_delivery(repo, approved_task(commit=approved))
     assert recovered.ok
     assert recovered.outcome == delivery.LOCAL_MERGE
@@ -126,7 +126,7 @@ def test_pull_request_pushes_then_creates_with_persisted_stages(
     landed = delivery.open_pull_request(
         repo,
         Task(id=7, text="ship safely"),
-        "agentq/7/a1",
+        "mergerail/7/a1",
         "main",
         "reviewed",
         commit="approved-sha",
@@ -157,7 +157,7 @@ def test_pull_request_reports_a_failed_push(
     landed = delivery.open_pull_request(
         repo,
         Task(id=8, text="ship"),
-        "agentq/8/a1",
+        "mergerail/8/a1",
         "main",
         "reviewed",
         commit="approved-sha",
@@ -186,7 +186,7 @@ def test_pull_request_recovers_if_pr_appears_after_push(
     landed = delivery.open_pull_request(
         repo,
         Task(id=8, text="ship"),
-        "agentq/8/a1",
+        "mergerail/8/a1",
         "main",
         "reviewed",
         commit="approved-sha",
@@ -219,7 +219,7 @@ def test_pull_request_treats_create_race_as_success(
     landed = delivery.open_pull_request(
         repo,
         Task(id=9, text="ship"),
-        "agentq/9/a1",
+        "mergerail/9/a1",
         "main",
         "reviewed",
         commit="approved-sha",
@@ -233,12 +233,12 @@ def test_delivery_preflight_rejects_invalid_inputs(repo: Path, tmp_path: Path) -
         delivery.resolve_mode(repo, "teleport")
 
     worktree = Worktree(repo, tmp_path / "wt-preflight")
-    worktree.reset("agentq/9/a1", "main")
+    worktree.reset("mergerail/9/a1", "main")
     (worktree.path / "change.txt").write_text("change", encoding="utf-8")
     worktree.commit_all("change")
     missing_path = delivery.merge_into_base(
         repo,
-        "agentq/9/a1",
+        "mergerail/9/a1",
         "main",
         commit=worktree.head(),
         validate=lambda _path: (True, "green"),

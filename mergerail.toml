@@ -1,4 +1,4 @@
-# agentq — written by `agentq init` from what this repository looks like.
+# MergeRail — written by `mergerail init` from what this repository looks like.
 # Everything here is optional; delete a line to go back to the detected value.
 
 base_branch = "master"
@@ -57,12 +57,12 @@ name = "pytest"
 command = "uv run pytest -q"
 
 # [telegram]
-# token = ""      # or AGENTQ_TELEGRAM_TOKEN in the environment
+# token = ""      # or MERGERAIL_TELEGRAM_TOKEN in the environment
 # admins = []     # numeric ids; empty means the first /start claims the bot
 
 # [web]
 # host = "127.0.0.1"
 # port = 8788
-# username = "agentq"   # use AGENTQ_WEB_PASSWORD for the secret
+# username = "mergerail"   # use MERGERAIL_WEB_PASSWORD for the secret
 # session_ttl = 28800
 # max_sse_clients = 16

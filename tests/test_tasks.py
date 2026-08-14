@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agentq.gitctl import attempt_branch
-from agentq.tasks import (
+from mergerail.gitctl import attempt_branch
+from mergerail.tasks import (
     SCHEMA_VERSION,
     DeliveryRecord,
     QueueCorruptError,
@@ -78,7 +78,7 @@ def test_a_corrupt_file_is_preserved_and_never_overwritten(tmp_path: Path) -> No
 def test_orphan_recovery_preserves_the_branch_and_requeues(tmp_path: Path) -> None:
     store = store_at(tmp_path)
     task = store.add("one")
-    store.update(task.id, status=Status.REVIEW, branch="agentq/1/a1", claimed_by="old")
+    store.update(task.id, status=Status.REVIEW, branch="mergerail/1/a1", claimed_by="old")
 
     recovered = store.recover_orphans()
     assert [item.id for item in recovered] == [task.id]
@@ -86,7 +86,7 @@ def test_orphan_recovery_preserves_the_branch_and_requeues(tmp_path: Path) -> No
     assert current is not None
     assert current.status == Status.NEW
     assert current.branch is None
-    assert current.previous_branches == ["agentq/1/a1"]
+    assert current.previous_branches == ["mergerail/1/a1"]
     assert current.claimed_by == ""
 
 
@@ -119,7 +119,7 @@ def test_delivery_record_round_trips(tmp_path: Path) -> None:
     task = store.add("one")
     approved = store.approve(
         task.id,
-        branch="agentq/1/a1",
+        branch="mergerail/1/a1",
         commit="abc123",
         requested_mode="auto",
         base_branch="main",
@@ -135,7 +135,7 @@ def test_delivery_record_round_trips(tmp_path: Path) -> None:
         requested_mode="auto",
         status="pending",
         base_branch="main",
-        branch="agentq/1/a1",
+        branch="mergerail/1/a1",
         commit="abc123",
         summary="implemented safely",
         review="APPROVE",
@@ -149,7 +149,7 @@ def test_delivery_retry_does_not_repeat_agent_work(tmp_path: Path) -> None:
     assert claimed is not None
     store.approve(
         task.id,
-        branch="agentq/1/a1",
+        branch="mergerail/1/a1",
         commit="abc123",
         requested_mode="pr",
         base_branch="main",
@@ -176,7 +176,7 @@ def test_retry_task_preserves_the_old_branch_and_uses_a_new_attempt(tmp_path: Pa
     store.add("one")
     first = store.take_next()
     assert first is not None and first.attempts == 1
-    first_branch = attempt_branch("agentq", first.id, first.attempts)
+    first_branch = attempt_branch("mergerail", first.id, first.attempts)
     store.update(
         first.id,
         branch=first_branch,
@@ -197,19 +197,19 @@ def test_retry_task_preserves_the_old_branch_and_uses_a_new_attempt(tmp_path: Pa
     assert retried.cost_usd == 0.0
     second = store.take_next()
     assert second is not None and second.attempts == 2
-    assert attempt_branch("agentq", second.id, second.attempts) == "agentq/1/a2"
+    assert attempt_branch("mergerail", second.id, second.attempts) == "mergerail/1/a2"
 
 
 def test_v1_blocked_task_is_preserved_as_legacy_and_backed_up(tmp_path: Path) -> None:
     store = store_at(tmp_path)
     store.path.write_text(
         '{"version": 1, "tasks": [{"id": 4, "text": "x", "status": "blocked", '
-        '"branch": "agentq/4"}]}',
+        '"branch": "mergerail/4"}]}',
         encoding="utf-8",
     )
     legacy = store.get(4)
     assert legacy is not None and legacy.legacy_blocked is True
-    assert legacy.branch == "agentq/4"
+    assert legacy.branch == "mergerail/4"
     assert store.retry_delivery(4) is None
 
     store.update(4, note="still needs a human")
@@ -385,7 +385,7 @@ def test_retry_snapshots_terminal_run_and_preserves_thread_and_sessions(
     store.update(
         task.id,
         status=Status.DONE,
-        branch="agentq/1/a1",
+        branch="mergerail/1/a1",
         approved_sha="abc123",
         delivery=DeliveryRecord(status="succeeded", commit="abc123"),
         note="landed",
@@ -399,7 +399,7 @@ def test_retry_snapshots_terminal_run_and_preserves_thread_and_sessions(
     run = retried.runs[0]
     assert run.attempt == 1
     assert run.status == Status.DONE
-    assert run.branch == "agentq/1/a1"
+    assert run.branch == "mergerail/1/a1"
     assert run.approved_sha == "abc123"
     assert run.delivery.commit == "abc123"
     assert run.note == "landed"

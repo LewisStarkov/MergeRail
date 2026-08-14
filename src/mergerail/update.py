@@ -1,4 +1,4 @@
-"""Install stable AgentQ releases directly from the Git repository."""
+"""Install stable MergeRail releases directly from the Git repository."""
 
 from __future__ import annotations
 
@@ -63,25 +63,25 @@ def update(*, check_only: bool = False) -> int:
         now = time.time()
         if tag is None:
             _write_state(now, tag)
-            print("agentq: the repository has no stable release tags yet")
+            print("mergerail: the repository has no stable release tags yet")
         elif not is_newer(tag):
             _write_state(now, tag)
-            print(f"agentq {__version__} is up to date ({tag})")
+            print(f"mergerail {__version__} is up to date ({tag})")
         elif check_only:
             _write_state(now, tag)
-            print(f"agentq {tag} is available (installed: {__version__})")
+            print(f"mergerail {tag} is available (installed: {__version__})")
         else:
             install_release(tag)
             _write_state(now, tag, installed=tag)
-            print(f"agentq: installed {tag}; the next invocation will use it")
+            print(f"mergerail: installed {tag}; the next invocation will use it")
         return 0
     except UpdateError as error:
-        print(f"agentq: update failed: {error}", file=sys.stderr)
+        print(f"mergerail: update failed: {error}", file=sys.stderr)
         return 1
 
 
 def auto_update() -> str | None:
-    if not _auto_update_enabled() or os.environ.get("AGENTQ_UPDATE_RELAUNCHED"):
+    if not _auto_update_enabled() or os.environ.get("MERGERAIL_UPDATE_RELAUNCHED"):
         return None
     now = time.time()
     state = _read_state()
@@ -102,11 +102,11 @@ def auto_update() -> str | None:
             return None
         install_release(tag)
         _write_state(now, tag, installed=tag)
-        print(f"agentq: installed {tag}; restarting with the new version")
+        print(f"mergerail: installed {tag}; restarting with the new version")
         return tag
     except UpdateError as error:
         _write_state(now, None)
-        print(f"agentq: automatic update failed: {error}", file=sys.stderr)
+        print(f"mergerail: automatic update failed: {error}", file=sys.stderr)
         return None
 
 
@@ -115,11 +115,11 @@ def relaunch(arguments: list[str]) -> int:
     if uv is None:
         raise UpdateError("uv disappeared after installing the update")
     tools = Path(_run([uv, "tool", "dir", "--bin"], timeout=30).stdout.strip())
-    executable = tools / ("agentq.exe" if sys.platform == "win32" else "agentq")
+    executable = tools / ("mergerail.exe" if sys.platform == "win32" else "mergerail")
     if not executable.is_file():
         raise UpdateError(f"updated executable was not found in {tools}")
     environment = os.environ.copy()
-    environment["AGENTQ_UPDATE_RELAUNCHED"] = "1"
+    environment["MERGERAIL_UPDATE_RELAUNCHED"] = "1"
     try:
         return subprocess.run([str(executable), *arguments], env=environment).returncode
     except OSError as error:
@@ -127,7 +127,7 @@ def relaunch(arguments: list[str]) -> int:
 
 
 def _repository(repository: str | None = None) -> str:
-    value = repository or os.environ.get("AGENTQ_UPDATE_REPOSITORY", REPOSITORY)
+    value = repository or os.environ.get("MERGERAIL_UPDATE_REPOSITORY", REPOSITORY)
     return value.removeprefix("git+")
 
 
@@ -152,11 +152,11 @@ def _run(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str
 
 
 def _auto_update_enabled() -> bool:
-    return os.environ.get("AGENTQ_AUTO_UPDATE", "1").strip().lower() not in _FALSE
+    return os.environ.get("MERGERAIL_AUTO_UPDATE", "1").strip().lower() not in _FALSE
 
 
 def _state_path() -> Path:
-    if custom := os.environ.get("AGENTQ_UPDATE_STATE"):
+    if custom := os.environ.get("MERGERAIL_UPDATE_STATE"):
         return Path(custom).expanduser()
     if sys.platform == "win32":
         root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
@@ -164,7 +164,7 @@ def _state_path() -> Path:
         root = Path.home() / "Library" / "Caches"
     else:
         root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return root / "agentq" / "update.json"
+    return root / "mergerail" / "update.json"
 
 
 def _read_state() -> dict[str, object]:

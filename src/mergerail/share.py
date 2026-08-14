@@ -45,21 +45,21 @@ class NgrokTunnel:
         self.url = ""
         self.username = ""
         self.password = ""
-        self._name = f"agentq-{secrets.token_hex(4)}"
+        self._name = f"mergerail-{secrets.token_hex(4)}"
         self._log_path = state_dir / "ngrok.log"
 
     def start(self, front: Front) -> str:
         if not isinstance(front, WebFront):
-            raise SystemExit("agentq: ngrok sharing requires the web front")
+            raise SystemExit("mergerail: ngrok sharing requires the web front")
         if front.host not in LOCAL_HOSTS:
-            raise SystemExit("agentq: ngrok sharing requires the web front to bind to localhost")
+            raise SystemExit("mergerail: ngrok sharing requires the web front to bind to localhost")
         binary = shutil.which("ngrok")
         if not binary:
             raise SystemExit(
-                "agentq: ngrok is not installed; install it from https://ngrok.com/download"
+                "mergerail: ngrok is not installed; install it from https://ngrok.com/download"
             )
         if self.policy is not None and not self.policy.is_file():
-            raise SystemExit(f"agentq: ngrok traffic policy not found: {self.policy}")
+            raise SystemExit(f"mergerail: ngrok traffic policy not found: {self.policy}")
 
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self._log_path.unlink(missing_ok=True)
@@ -77,7 +77,7 @@ class NgrokTunnel:
         if self.policy is not None:
             command.extend(["--traffic-policy-file", str(self.policy)])
         elif not self.unsafe:
-            self.username = "agentq"
+            self.username = "mergerail"
             self.password = secrets.token_urlsafe(12)
             front.enable_auth(self.username, self.password)
 
@@ -89,7 +89,7 @@ class NgrokTunnel:
                 stderr=subprocess.STDOUT,
             )
         except OSError as exc:
-            raise SystemExit(f"agentq: cannot start ngrok — {exc}") from exc
+            raise SystemExit(f"mergerail: cannot start ngrok — {exc}") from exc
         try:
             self.url = self._wait_for_url()
         except BaseException:
@@ -105,7 +105,7 @@ class NgrokTunnel:
                 note="generated for this session",
             )
         elif self.unsafe:
-            log.warn("ngrok.unprotected", note="anyone with the URL can control AgentQ")
+            log.warn("ngrok.unprotected", note="anyone with the URL can control MergeRail")
         return self.url
 
     def stop(self) -> None:
@@ -129,7 +129,7 @@ class NgrokTunnel:
             if code is not None:
                 detail = self._log_tail()
                 suffix = f" — {detail}" if detail else ""
-                raise SystemExit(f"agentq: ngrok exited during startup ({code}){suffix}")
+                raise SystemExit(f"mergerail: ngrok exited during startup ({code}){suffix}")
             url = self._public_url()
             if url:
                 return url
@@ -137,7 +137,8 @@ class NgrokTunnel:
         detail = self._log_tail()
         suffix = f" — {detail}" if detail else ""
         raise SystemExit(
-            f"agentq: ngrok did not publish a URL within {self.startup_timeout:g} seconds{suffix}"
+            "mergerail: ngrok did not publish a URL within "
+            f"{self.startup_timeout:g} seconds{suffix}"
         )
 
     def _public_url(self) -> str:

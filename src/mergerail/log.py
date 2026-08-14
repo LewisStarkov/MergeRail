@@ -10,7 +10,7 @@ import logging
 import sys
 from typing import Any
 
-logger = logging.getLogger("agentq")
+logger = logging.getLogger("mergerail")
 
 
 def setup(level: str = "INFO") -> None:

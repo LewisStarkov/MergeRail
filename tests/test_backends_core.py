@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from agentq.backends.base import (
+from mergerail.backends.base import (
     AgentReply,
     BackendCapabilities,
     BackendInfo,
@@ -17,14 +17,14 @@ from agentq.backends.base import (
     TurnRequest,
     Usage,
 )
-from agentq.backends.claude import AgentOptions, ClaudeAgent, ClaudeBackend, ClaudeSession
-from agentq.backends.process import (
+from mergerail.backends.claude import AgentOptions, ClaudeAgent, ClaudeBackend, ClaudeSession
+from mergerail.backends.process import (
     JsonlProcessResult,
     ProcessController,
     parse_event,
     run_jsonl,
 )
-from agentq.backends.registry import BackendRegistry, BackendRegistryError, default_registry
+from mergerail.backends.registry import BackendRegistry, BackendRegistryError, default_registry
 
 
 class FakeBackend:
@@ -78,7 +78,7 @@ def test_claude_maps_neutral_permissions_and_enforces_review_denials(tmp_path: P
 def test_claude_passes_supported_schema_and_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("agentq.backends.claude.cli_supports", lambda flag: True)
+    monkeypatch.setattr("mergerail.backends.claude.cli_supports", lambda flag: True)
     session = ClaudeSession(SessionSpec("reviewer", tmp_path))
     command = session._command(
         TurnRequest("review", schema={"type": "object"}, max_cost_usd=0.12567)
@@ -133,7 +133,7 @@ def test_claude_streams_events_and_resumes(tmp_path: Path, monkeypatch: pytest.M
             callback(event)
         return JsonlProcessResult(events, "", 0, False, 0.01)
 
-    monkeypatch.setattr("agentq.backends.claude.run_jsonl", fake_run)
+    monkeypatch.setattr("mergerail.backends.claude.run_jsonl", fake_run)
     assert session.ask(TurnRequest("first")).text == "ok"
     assert session.ask(TurnRequest("second")).text == "ok"
     assert "--resume" not in seen_commands[0]
@@ -224,7 +224,7 @@ def test_no_result_preserves_stderr_and_unknown_cost(
 ) -> None:
     session = ClaudeSession(SessionSpec("fixer", tmp_path))
     failed = JsonlProcessResult((), "bad flag\n", 2, False, 0.1)
-    monkeypatch.setattr("agentq.backends.claude.run_jsonl", lambda *args, **kwargs: failed)
+    monkeypatch.setattr("mergerail.backends.claude.run_jsonl", lambda *args, **kwargs: failed)
     reply = session.ask(TurnRequest("work"))
     assert reply.is_error
     assert reply.text == "bad flag"

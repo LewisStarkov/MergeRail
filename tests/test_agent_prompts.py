@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentq.agent import AgentOptions, ClaudeAgent, context_size, parse_event, tool_hint
-from agentq.config import ProjectContext
-from agentq.prompts import (
+from mergerail.agent import AgentOptions, ClaudeAgent, context_size, parse_event, tool_hint
+from mergerail.config import ProjectContext
+from mergerail.prompts import (
     REVIEW_SCHEMA,
     answer_of,
     fix,
@@ -14,7 +14,7 @@ from agentq.prompts import (
     reviewer_system,
     verdict_of,
 )
-from agentq.tasks import Task, TaskMessage
+from mergerail.tasks import Task, TaskMessage
 
 
 def agent(**options: object) -> ClaudeAgent:
@@ -152,14 +152,14 @@ def test_operator_context_reaches_both_agents() -> None:
 
 def test_the_task_prompts_carry_only_the_task() -> None:
     task = Task(id=1, text="fix it")
-    body = fix(task, "agentq/1", "main", "")
-    assert "agentq/1" in body and "fix it" in body
+    body = fix(task, "mergerail/1", "main", "")
+    assert "mergerail/1" in body and "fix it" in body
 
-    verdict = review(task, "agentq/1", "main", "ruff: PASS", "tiny diff", "one.txt | 2 +-")
+    verdict = review(task, "mergerail/1", "main", "ruff: PASS", "tiny diff", "one.txt | 2 +-")
     assert "ruff: PASS" in verdict
     assert "tiny diff" in verdict  # short diffs ride along, saving a round-trip
 
-    huge = review(task, "agentq/1", "main", "ruff: PASS", "x" * 9000, "one.txt | 2 +-")
+    huge = review(task, "mergerail/1", "main", "ruff: PASS", "x" * 9000, "one.txt | 2 +-")
     assert "x" * 100 not in huge  # long ones are read in the worktree instead
     assert "one.txt" in huge
 
@@ -171,7 +171,7 @@ def test_task_prompts_carry_the_durable_discussion() -> None:
         TaskMessage(id=2, text="see this", file="/tmp/shot.png"),
     ]
 
-    initial = fix(task, "agentq/1", "main", "", messages)
+    initial = fix(task, "mergerail/1", "main", "", messages)
     continued = follow_up(messages[-1:])
 
     assert "keep the old API" in initial

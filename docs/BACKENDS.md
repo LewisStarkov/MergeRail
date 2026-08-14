@@ -1,6 +1,6 @@
 # Agent backends
 
-`agentq` separates orchestration from the command-line agent that performs a turn. The
+`mergerail` separates orchestration from the command-line agent that performs a turn. The
 fixer and reviewer may use different backends, while the runner sees the same
 `SessionSpec`, `TurnRequest`, streaming events, and `AgentReply` from each one.
 
@@ -12,7 +12,7 @@ backend, setting it explicitly keeps later runs predictable.
 
 The CLI accepts either backend-oriented or user-facing names. `--agent codex`
 is an alias for `--backend codex`; `--fixer-agent` and `--reviewer-agent` map to
-their corresponding backend flags. `agentq init` asks for these selections and
+their corresponding backend flags. `mergerail init` asks for these selections and
 persists them, while `run` and `once` flags override the file for one process.
 
 ```toml
@@ -75,7 +75,7 @@ successful-looking default. In v0.1, external commands are not launched during
 preflight, so their probe is deliberately conservative and `max_usd` cannot be combined
 with an external backend.
 
-With `strict_security = true` (or `agentq run --strict-security`), preflight requires
+With `strict_security = true` (or `mergerail run --strict-security`), preflight requires
 native push denial for both roles and native read-only enforcement for the reviewer.
 This deliberately rejects a backend whose probe cannot establish those guarantees.
 Agent sessions belong to one task. The runner closes in-memory handles at task
@@ -85,13 +85,13 @@ the discussion context. Session ids are never shared between tasks.
 
 ## Trusted external driver protocol
 
-An external driver connects another headless agent to `agentq-jsonl-v1`. Configure its
+An external driver connects another headless agent to `mergerail-jsonl-v1`. Configure its
 command explicitly; external executables are never discovered or launched by probing.
 
 ```toml
 [backends.gemini]
-protocol = "agentq-jsonl-v1"
-command = ["agentq-gemini-driver"]
+protocol = "mergerail-jsonl-v1"
+command = ["mergerail-gemini-driver"]
 
 [agents.fixer]
 backend = "gemini"
@@ -104,10 +104,10 @@ stderr; any non-JSON stdout line is a protocol error. Frames use UTF-8 and are l
 
 ### Handshake
 
-Immediately after starting the process, `agentq` sends:
+Immediately after starting the process, `mergerail` sends:
 
 ```json
-{"type":"hello","protocol":1,"agentq_version":"0.1.0"}
+{"type":"hello","protocol":1,"mergerail_version":"0.1.0"}
 ```
 
 The driver must answer before the handshake timeout:
@@ -138,7 +138,7 @@ booleans; omitted capabilities are false.
 
 ### Open a session
 
-After the handshake, `agentq` sends an `open_session` request:
+After the handshake, `mergerail` sends an `open_session` request:
 
 ```json
 {
@@ -210,7 +210,7 @@ A successful terminal response is:
 ```
 
 All telemetry fields are optional. Omit `cost_usd` when cost is unknown; sending `0`
-means the exact cost was zero. If `context_tokens` is absent, `agentq` derives it from
+means the exact cost was zero. If `context_tokens` is absent, `mergerail` derives it from
 the input and cache token fields when possible. `structured` must be a JSON object when
 present.
 
@@ -225,7 +225,7 @@ For a failed turn, either return `result` with `is_error=true` or an error frame
 ```
 
 An error during session opening raises a protocol error. An error during a turn becomes
-an unsuccessful `AgentReply`. When the session closes, `agentq` sends a best-effort
+an unsuccessful `AgentReply`. When the session closes, `mergerail` sends a best-effort
 `close_session` frame containing `request_id` and `session_id`, then stops the process.
 
 ### Timeouts and protocol failures
@@ -244,7 +244,7 @@ an unsuccessful `AgentReply`. When the session closes, `agentq` sends a best-eff
 
 ## Security boundary
 
-External drivers are trusted code, not sandboxed plugins. They inherit the `agentq`
+External drivers are trusted code, not sandboxed plugins. They inherit the `mergerail`
 process environment, receive an absolute worktree path, prompts, model settings, and the
 declared policy, and may start their own child processes or access the network. Only
 configure executables you would be willing to run directly in that repository.
@@ -253,6 +253,6 @@ Capability negotiation is a declaration, not remote attestation. A malicious or 
 driver can claim read-only or push denial while ignoring both. Drivers should enforce
 reviewer isolation and push denial with their tool's native sandbox or permission system,
 strip credentials they do not require, avoid loading unrelated user plugins, and keep all
-delivery credentials outside agent subprocesses. `agentq` validates framing, correlation,
+delivery credentials outside agent subprocesses. `mergerail` validates framing, correlation,
 timeouts, and process cleanup; it cannot prove that an external driver obeyed its declared
 security policy.

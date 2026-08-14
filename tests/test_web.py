@@ -15,14 +15,14 @@ from typing import Any
 
 import pytest
 
-from agentq.fronts.base import StreamEvent
-from agentq.fronts.web import (
+from mergerail.fronts.base import StreamEvent
+from mergerail.fronts.web import (
     MAX_LIVE_TASKS,
     MAX_LIVE_TEXT_CHARS,
     MAX_LOGIN_FAILURES,
     WebFront,
 )
-from agentq.tasks import Status, TaskStore
+from mergerail.tasks import Status, TaskStore
 
 
 class SetupStub:
@@ -46,7 +46,7 @@ class SetupStub:
     def apply_setup(self, payload: Any, progress: Any) -> tuple[int, dict[str, Any]]:
         self.received = dict(payload)
         progress("validating", "Checking answers")
-        progress("saving", "Writing agentq.toml")
+        progress("saving", "Writing mergerail.toml")
         progress("complete", "Ready")
         return 200, {"ok": True}
 
@@ -79,7 +79,7 @@ def call_response(
 def test_the_page_is_served(front: WebFront) -> None:
     with urllib.request.urlopen(f"http://127.0.0.1:{front.port}/", timeout=5) as response:
         page = response.read().decode("utf-8")
-    assert "agentq" in page
+    assert "MergeRail" in page
     assert "textContent" in page  # task text must never become markup
     assert 'new EventSource("/api/events")' in page
     assert "aria-live" in page
@@ -394,7 +394,7 @@ def test_unknown_paths_are_404(front: WebFront) -> None:
 
 def test_auth_uses_the_styled_login_and_protects_api_and_sse(tmp_path: Path) -> None:
     served = WebFront(TaskStore(tmp_path / "tasks.json"), port=0)
-    served.enable_auth("agentq", "correct-horse")
+    served.enable_auth("mergerail", "correct-horse")
     served.store.add("protected task")
     served.start()
     root = f"http://127.0.0.1:{served.port}"
@@ -423,7 +423,7 @@ def test_auth_uses_the_styled_login_and_protects_api_and_sse(tmp_path: Path) -> 
 
         wrong = urllib.request.Request(
             root + "/login",
-            data=urllib.parse.urlencode({"username": "agentq", "password": "wrong"}).encode(),
+            data=urllib.parse.urlencode({"username": "mergerail", "password": "wrong"}).encode(),
         )
         with pytest.raises(urllib.error.HTTPError) as rejected:
             urllib.request.urlopen(wrong, timeout=5)
@@ -435,14 +435,14 @@ def test_auth_uses_the_styled_login_and_protects_api_and_sse(tmp_path: Path) -> 
         login = urllib.request.Request(
             root + "/login",
             data=urllib.parse.urlencode(
-                {"username": "agentq", "password": "correct-horse"}
+                {"username": "mergerail", "password": "correct-horse"}
             ).encode(),
         )
         with browser.open(login, timeout=5) as response:
             assert response.url == root + "/"
             assert 'class="workbench"' in response.read().decode("utf-8")
         (session,) = list(cookies)
-        assert session.name == "agentq_session"
+        assert session.name == "mergerail_session"
         assert session.has_nonstandard_attr("HttpOnly")
 
         with browser.open(root + "/api/events", timeout=5) as response:
@@ -459,30 +459,30 @@ def test_nonlocal_web_requires_authentication_or_explicit_unsafe(tmp_path: Path)
         refused.start()
 
     authenticated = WebFront(TaskStore(tmp_path / "authenticated.json"), host="0.0.0.0", port=0)
-    authenticated.enable_auth("agentq", "secret")
+    authenticated.enable_auth("mergerail", "secret")
     authenticated.start()
     authenticated.stop()
 
 
 def test_web_sessions_expire_logout_and_rate_limit(tmp_path: Path) -> None:
     served = WebFront(TaskStore(tmp_path / "tasks.json"), session_ttl=0.01)
-    served.enable_auth("agentq", "secret")
-    token = served.authenticate("agentq", "secret", client="ok")
+    served.enable_auth("mergerail", "secret")
+    token = served.authenticate("mergerail", "secret", client="ok")
     assert token is not None
-    cookie = f"agentq_session={token}"
+    cookie = f"mergerail_session={token}"
     assert served.authenticated(cookie)
     served.logout(cookie)
     assert not served.authenticated(cookie)
 
-    expiring = served.authenticate("agentq", "secret", client="ok")
+    expiring = served.authenticate("mergerail", "secret", client="ok")
     assert expiring is not None
     time.sleep(0.02)
-    assert not served.authenticated(f"agentq_session={expiring}")
+    assert not served.authenticated(f"mergerail_session={expiring}")
 
     for _ in range(MAX_LOGIN_FAILURES):
-        assert served.authenticate("agentq", "wrong", client="attacker") is None
+        assert served.authenticate("mergerail", "wrong", client="attacker") is None
     assert served.login_limited("attacker")
-    assert served.authenticate("agentq", "secret", client="attacker") is None
+    assert served.authenticate("mergerail", "secret", client="attacker") is None
 
 
 def test_event_streams_have_a_connection_cap(tmp_path: Path) -> None:

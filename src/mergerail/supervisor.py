@@ -7,7 +7,7 @@ to the agent as context — nine times out of ten the task *is* the exception th
 service has been logging for the last five minutes.
 
 The child is started as the root of its own process tree and stopped as a
-tree — see :mod:`agentq.procs` for why, and for how that works per platform.
+tree — see :mod:`mergerail.procs` for why, and for how that works per platform.
 """
 
 from __future__ import annotations
