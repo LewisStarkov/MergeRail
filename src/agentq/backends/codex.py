@@ -83,22 +83,19 @@ class CodexSession:
         return CAPABILITIES
 
     def command(self, prompt: str, *, schema_path: Path | None = None) -> list[str]:
-        sandbox = (
-            "read-only"
-            if self.spec.read_only or self.spec.role == "reviewer"
-            else "workspace-write"
-        )
         args = [
             *self._executable,
             "exec",
             "--json",
             "--color",
             "never",
-            "--sandbox",
-            sandbox,
-            "--cd",
-            str(self.spec.cwd),
         ]
+        read_only = self.spec.read_only or self.spec.role == "reviewer"
+        if self.spec.permission == "skip" and not read_only:
+            args.append("--dangerously-bypass-approvals-and-sandbox")
+        else:
+            args += ["--sandbox", "read-only" if read_only else "workspace-write"]
+        args += ["--cd", str(self.spec.cwd)]
         if self.spec.model:
             args += ["--model", self.spec.model]
         if self.spec.effort:

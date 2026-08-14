@@ -35,6 +35,22 @@ def test_codex_maps_roles_models_effort_and_resume(repo: Path) -> None:
     assert resumed[-3:] == ["resume", "thread-1", "again"]
 
 
+def test_codex_skip_permission_disables_sandbox_only_for_fixer(repo: Path) -> None:
+    fixer = codex.CodexBackend(("fake-codex",)).open_session(
+        SessionSpec("fixer", repo, permission="skip")
+    )
+    fixer_command = fixer.command("inspect")
+    assert "--dangerously-bypass-approvals-and-sandbox" in fixer_command
+    assert "--sandbox" not in fixer_command
+
+    reviewer = codex.CodexBackend(("fake-codex",)).open_session(
+        SessionSpec("reviewer", repo, permission="skip")
+    )
+    reviewer_command = reviewer.command("inspect")
+    assert "--dangerously-bypass-approvals-and-sandbox" not in reviewer_command
+    assert reviewer_command[reviewer_command.index("--sandbox") + 1] == "read-only"
+
+
 def test_codex_resumes_an_initial_session_without_repeating_the_system_prompt(
     repo: Path, monkeypatch: Any
 ) -> None:

@@ -48,9 +48,7 @@
     color: var(--sidebar-dim); cursor: pointer; font-size: .8rem;
   }
   .attachment-control span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  details.live {
-    border-top: 1px solid var(--line); margin-top: .65rem; padding-top: .55rem;
-  }
+  details.live { margin: 0; }
   details.live > summary {
     color: var(--dim); cursor: pointer; font-size: .8rem; list-style-position: outside;
   }
@@ -263,6 +261,7 @@
   }
   .thread-message.user { margin-left: auto; background: #edf5ff; border-color: #a6c8ff; }
   .thread-message.system { max-width: 100%; background: #fff; color: var(--dim); }
+  .thread-message.activity { color: var(--ink); }
   .thread-message.failed { border-color: var(--danger); }
   .thread-message-head {
     display: flex; align-items: center; flex-wrap: wrap; gap: .35rem;
@@ -282,14 +281,12 @@
   .thread-composer .comment { margin-left: auto; }
   .thread-composer .primary { margin-left: 0; }
   .thread-empty { padding: 1.25rem; border: 1px dashed var(--line); color: var(--dim); }
-  .detail .live {
-    margin-top: 2rem; padding: .85rem 1rem; border: 1px solid var(--line);
-    border-radius: 0; background: var(--card);
+  .thread-message.activity .live > summary {
+    display: flex; align-items: center; gap: .5rem;
   }
-  .detail .live > summary { display: flex; align-items: center; gap: .5rem; }
-  .detail .live > summary::marker { content: ""; }
-  .detail .live > summary .activity-chevron { margin-left: auto; }
-  .detail .live[open] > summary .activity-chevron { transform: rotate(90deg); }
+  .thread-message.activity .live > summary::marker { content: ""; }
+  .thread-message.activity .activity-chevron { margin-left: auto; }
+  .thread-message.activity .live[open] .activity-chevron { transform: rotate(90deg); }
 
   @media (max-width: 760px) {
     .workbench { display: block; }
@@ -588,7 +585,6 @@ function renderDetail(t) {
   body.append(facts);
   if (t.delivery) body.append(delivery(t.delivery));
   body.append(thread(t));
-  if (t.live && Object.keys(t.live.roles || {}).length) body.append(live(t.id, t.live));
   if (t.note) body.append(section("Result", t.note, "check2-square"));
   if (t.url && /^https?:\/\//.test(t.url)) {
     const link = document.createElement("a");
@@ -713,6 +709,8 @@ function thread(task) {
     created_at: task.created_at,
   }));
   list.append(...state.messages.map(messageBubble));
+  if (task.live && Object.keys(task.live.roles || {}).length)
+    list.append(agentActivity(task.id, task.live));
   if (!state.loaded && state.loading)
     list.append(line("div", "thread-empty", "Loading discussion…"));
   wrap.append(list);
@@ -863,7 +861,9 @@ async function readFile(file) {
   return String(value).split(",", 2)[1];
 }
 
-function live(taskId, trace) {
+function agentActivity(taskId, trace) {
+  const message = document.createElement("article");
+  message.className = "thread-message system activity";
   const box = document.createElement("details");
   box.className = "live";
   box.open = expandedStreams.has(taskId);
@@ -922,7 +922,8 @@ function live(taskId, trace) {
     body.append(role);
   }
   box.append(body);
-  return box;
+  message.append(box);
+  return message;
 }
 
 function actions(t) {

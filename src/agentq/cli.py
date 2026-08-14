@@ -563,8 +563,8 @@ def preflight(config: Config) -> bool:
             return False
     if config.fixer.permission == "skip":
         log.warn(
-            "agentq.permissions_bypassed — the agents run with --dangerously-skip-permissions "
-            "inside their worktree"
+            "agentq.permissions_bypassed — the fixer runs without sandbox or approval checks "
+            "inside its worktree"
         )
     return True
 

@@ -6,6 +6,3 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 dist/
-graphify-out/
-council-*.html
-council-*.md
