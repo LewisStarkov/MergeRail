@@ -20,8 +20,10 @@ class RunnerBusy(RuntimeError):
 if sys.platform == "win32":
     import msvcrt
 
+    _LOCK_OFFSET = 1 << 20
+
     def _try_lock(handle: IO[str]) -> bool:
-        handle.seek(0)
+        handle.seek(_LOCK_OFFSET)
         try:
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
@@ -29,7 +31,7 @@ if sys.platform == "win32":
         return True
 
     def _unlock(handle: IO[str]) -> None:
-        handle.seek(0)
+        handle.seek(_LOCK_OFFSET)
         with contextlib.suppress(OSError):
             msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
