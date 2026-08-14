@@ -82,8 +82,6 @@ def test_merge_fast_forwards_into_the_base(repo: Path, tmp_path: Path) -> None:
 def test_validated_merge_checks_the_combined_tree_before_moving_base(
     repo: Path, tmp_path: Path
 ) -> None:
-    run("config", "user.email", "t@example.com", cwd=repo)
-    run("config", "user.name", "test", cwd=repo)
     worktree = Worktree(repo, tmp_path / "wt")
     worktree.reset("agentq/1", "main")
     (worktree.path / "agent.txt").write_text("agent", encoding="utf-8")

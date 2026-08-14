@@ -24,6 +24,8 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "project"
     root.mkdir()
     run("init", "-q", "-b", "main", cwd=root)
+    run("config", "user.email", "t@example.com", cwd=root)
+    run("config", "user.name", "test", cwd=root)
     (root / "README.md").write_text("# project\n", encoding="utf-8")
     run("add", "-A", cwd=root)
     run("commit", "-qm", "init", cwd=root)
