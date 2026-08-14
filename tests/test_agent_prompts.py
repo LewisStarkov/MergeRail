@@ -124,8 +124,11 @@ def test_the_rules_live_in_the_system_prompts() -> None:
 
 def test_review_schema_is_valid_for_strict_structured_outputs() -> None:
     properties = REVIEW_SCHEMA["properties"]
+    required = REVIEW_SCHEMA["required"]
+    assert isinstance(properties, dict)
+    assert isinstance(required, list)
     assert REVIEW_SCHEMA["additionalProperties"] is False
-    assert set(REVIEW_SCHEMA["required"]) == set(properties)
+    assert set(required) == set(properties)
 
 
 def test_operator_context_reaches_both_agents() -> None:
