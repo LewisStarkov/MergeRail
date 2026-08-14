@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from . import checks, log
+from . import update as updater
 from .audit import AuditLog
 from .backends import BackendInfo, BackendRegistry
 from .backends.policy import strict_security_gaps
@@ -43,6 +44,7 @@ COMMANDS = (
     "archive",
     "backends",
     "events",
+    "update",
     "once",
 )
 
@@ -99,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_agent_flags(run)
     run.add_argument("--model", default="", help="model for both agents")
     run.add_argument("--no-process", action="store_true", help="do not run the configured app")
+    run.add_argument("--no-update", action="store_true", help="skip the automatic update check")
     run.add_argument(
         "--dangerous",
         action="store_true",
@@ -172,6 +175,11 @@ def build_parser() -> argparse.ArgumentParser:
     events.add_argument("--limit", type=int, default=100)
     events.add_argument("--json", action="store_true", dest="json_output")
 
+    update = commands.add_parser(
+        "update", parents=[common], help="install the latest stable Git release"
+    )
+    update.add_argument("--check", action="store_true", help="check without installing")
+
     once = commands.add_parser("once", parents=[common], help="queue one task and work it now")
     once.add_argument("text", nargs="+", help="the task, as you would write it to a person")
     once.add_argument(
@@ -181,6 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     once.add_argument("--model", default="", help="model for both agents")
     once.add_argument("--dangerous", action="store_true")
     once.add_argument("--strict-security", action="store_true")
+    once.add_argument("--no-update", action="store_true", help="skip the automatic update check")
 
     return parser
 
@@ -602,6 +611,18 @@ def main(argv: list[str] | None = None) -> int:
         arguments = ["run", *arguments]
     args = build_parser().parse_args(arguments)
     log.setup(args.log_level)
+    if args.command == "update":
+        return updater.update(check_only=args.check)
+    if (
+        argv is None
+        and args.command in {"run", "once"}
+        and not args.no_update
+        and updater.auto_update()
+    ):
+        try:
+            return updater.relaunch(arguments)
+        except updater.UpdateError as error:
+            print(f"agentq: could not restart after updating: {error}", file=sys.stderr)
     config = resolve(args)
 
     if args.command == "init":
