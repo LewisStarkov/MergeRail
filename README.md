@@ -11,9 +11,17 @@ the `agentq-jsonl-v1` external-driver protocol.
 
 ```bash
 cd your-project
-uvx agentq init
-uvx agentq run --web
+uv tool install agentq
+agentq init
+agentq run --web
 ```
+
+AgentQ checks the repository for a newer stable `vX.Y.Z` tag before `run` and
+`once`, at most once every 24 hours. It installs updates with `uv tool` and
+restarts before taking ownership of the queue. Use `agentq update --check` to
+check manually, `agentq update` to install immediately, or `--no-update` /
+`AGENTQ_AUTO_UPDATE=0` to disable the automatic check. A fork can set
+`AGENTQ_UPDATE_REPOSITORY` to its Git URL.
 
 In a terminal, `init` asks for one AI agent, the target environment, the current
 objective and whether external actions require approval. It saves those answers

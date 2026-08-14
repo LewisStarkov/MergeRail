@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agentq import update
 from agentq.audit import AuditLog
 from agentq.backends.registry import BackendRegistry
 from agentq.cli import _share, build_parser, main, resolve
@@ -32,6 +33,21 @@ def test_add_then_list(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
 def test_list_of_nothing_says_so(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["list", "--path", str(repo)]) == 0
     assert "empty" in capsys.readouterr().out
+
+
+def test_update_command_does_not_require_a_project_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called: list[bool] = []
+
+    def run_update(*, check_only: bool) -> int:
+        called.append(check_only)
+        return 0
+
+    monkeypatch.setattr(update, "update", run_update)
+
+    assert main(["update", "--check"]) == 0
+    assert called == [True]
 
 
 def test_events_reads_and_filters_the_audit_journal(
