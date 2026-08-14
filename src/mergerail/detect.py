@@ -3,7 +3,7 @@
 The point of the whole tool is that you run it in a repository and it works. So
 nothing here asks: the base branch comes from the refs, and the checks come from
 whatever manifest is lying in the root. A wrong guess is cheap — it lands in
-``agentq.toml`` on first run, where you can fix it once.
+``mergerail.toml`` on first run, where you can fix it once.
 
 A check is only proposed if the thing that would run it exists on this machine.
 An agent that has to read ``command not found`` on every round is an agent

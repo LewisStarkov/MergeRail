@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agentq import update
+from mergerail import update
 
 
 def completed(
@@ -24,7 +24,7 @@ def test_latest_release_uses_the_highest_stable_semver(monkeypatch: pytest.Monke
     )
     monkeypatch.setattr(update, "_run", lambda *args, **kwargs: completed(output))
 
-    assert update.latest_release("https://example.test/agentq.git") == "v1.10.0"
+    assert update.latest_release("https://example.test/mergerail.git") == "v1.10.0"
 
 
 def test_install_release_uses_uv_and_the_tag(
@@ -36,10 +36,10 @@ def test_install_release_uses_uv_and_the_tag(
         calls.append(command)
         return completed()
 
-    monkeypatch.setattr("agentq.update.shutil.which", lambda name: "/usr/bin/uv")
+    monkeypatch.setattr("mergerail.update.shutil.which", lambda name: "/usr/bin/uv")
     monkeypatch.setattr(update, "_run", run)
 
-    update.install_release("v1.2.3", "https://example.test/agentq.git")
+    update.install_release("v1.2.3", "https://example.test/mergerail.git")
 
     assert calls == [
         [
@@ -47,7 +47,7 @@ def test_install_release_uses_uv_and_the_tag(
             "tool",
             "install",
             "--force",
-            "git+https://example.test/agentq.git@v1.2.3",
+            "git+https://example.test/mergerail.git@v1.2.3",
         ]
     ]
 
@@ -56,8 +56,8 @@ def test_auto_update_checks_only_once_per_day(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state = tmp_path / "update.json"
-    monkeypatch.setenv("AGENTQ_UPDATE_STATE", str(state))
-    monkeypatch.setattr("agentq.update.time.time", lambda: 100_000.0)
+    monkeypatch.setenv("MERGERAIL_UPDATE_STATE", str(state))
+    monkeypatch.setattr("mergerail.update.time.time", lambda: 100_000.0)
     monkeypatch.setattr(update, "latest_release", lambda: "v0.1.0")
 
     assert update.auto_update() is None
@@ -75,7 +75,7 @@ def test_auto_update_installs_a_new_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state = tmp_path / "update.json"
-    monkeypatch.setenv("AGENTQ_UPDATE_STATE", str(state))
+    monkeypatch.setenv("MERGERAIL_UPDATE_STATE", str(state))
     monkeypatch.setattr(update, "latest_release", lambda: "v0.2.0")
     installed: list[str] = []
     monkeypatch.setattr(update, "install_release", installed.append)
@@ -95,8 +95,8 @@ def test_uvx_bootstrap_relaunches_an_already_installed_update(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("AGENTQ_UPDATE_STATE", str(state))
-    monkeypatch.setattr("agentq.update.time.time", lambda: 100_001.0)
+    monkeypatch.setenv("MERGERAIL_UPDATE_STATE", str(state))
+    monkeypatch.setattr("mergerail.update.time.time", lambda: 100_001.0)
     monkeypatch.setattr(
         update,
         "latest_release",

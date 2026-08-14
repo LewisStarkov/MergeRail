@@ -10,7 +10,7 @@ afternoon. Ignored files stay put too, which is why ``git clean`` here runs
 without ``-x``.
 
 Tasks are serial, so nothing is lost by sharing the directory — and a failed
-task's work is not lost either: its commits live on the ``agentq/<id>`` branch,
+task's work is not lost either: its commits live on the ``mergerail/<id>`` branch,
 which outlives the reset.
 """
 

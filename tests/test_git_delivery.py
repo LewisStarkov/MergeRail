@@ -4,12 +4,12 @@ import sys
 import threading
 from pathlib import Path
 
-from agentq.checks import baseline
-from agentq.checks import run as run_checks
-from agentq.delivery import LOCAL, Landing, land, merge_into_base, pr_body, resolve_mode
-from agentq.detect import Check
-from agentq.gitctl import GitError, Worktree, current_branch, detect_base_branch, git, remote_url
-from agentq.tasks import Task
+from mergerail.checks import baseline
+from mergerail.checks import run as run_checks
+from mergerail.delivery import LOCAL, Landing, land, merge_into_base, pr_body, resolve_mode
+from mergerail.detect import Check
+from mergerail.gitctl import GitError, Worktree, current_branch, detect_base_branch, git, remote_url
+from mergerail.tasks import Task
 from tests.conftest import run
 
 PASSING = Check("yes", [sys.executable, "-c", "pass"])
@@ -32,37 +32,37 @@ def test_base_branch_honours_what_the_clone_recorded(repo: Path) -> None:
 
 def test_a_worktree_is_reset_between_tasks(repo: Path, tmp_path: Path) -> None:
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1", "main")
+    worktree.reset("mergerail/1", "main")
     (worktree.path / "one.txt").write_text("first task", encoding="utf-8")
     worktree.commit_all("first")
     first_head = worktree.head()
 
-    worktree.reset("agentq/2", "main")
+    worktree.reset("mergerail/2", "main")
     assert worktree.head() != first_head
     assert not (worktree.path / "one.txt").exists()
     # The first task's work survives on its own branch.
-    assert git("rev-parse", "agentq/1", cwd=repo) == first_head
+    assert git("rev-parse", "mergerail/1", cwd=repo) == first_head
 
 
 def test_a_worktree_never_resets_an_existing_task_branch(repo: Path, tmp_path: Path) -> None:
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1/a1", "main")
+    worktree.reset("mergerail/1/a1", "main")
     (worktree.path / "approved.txt").write_text("keep me", encoding="utf-8")
     worktree.commit_all("approved")
     approved = worktree.head()
 
     try:
-        worktree.reset("agentq/1/a1", "main")
+        worktree.reset("mergerail/1/a1", "main")
     except GitError as exc:
         assert "refusing to reset" in str(exc)
     else:
         raise AssertionError("existing branches must be protected")
-    assert git("rev-parse", "agentq/1/a1", cwd=repo) == approved
+    assert git("rev-parse", "mergerail/1/a1", cwd=repo) == approved
 
 
 def test_leftovers_are_visible_as_dirt(repo: Path, tmp_path: Path) -> None:
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1", "main")
+    worktree.reset("mergerail/1", "main")
     assert worktree.is_dirty() is False
     (worktree.path / "x.txt").write_text("x", encoding="utf-8")
     assert worktree.is_dirty() is True
@@ -70,11 +70,11 @@ def test_leftovers_are_visible_as_dirt(repo: Path, tmp_path: Path) -> None:
 
 def test_merge_fast_forwards_into_the_base(repo: Path, tmp_path: Path) -> None:
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1", "main")
+    worktree.reset("mergerail/1", "main")
     (worktree.path / "one.txt").write_text("done", encoding="utf-8")
     worktree.commit_all("work")
 
-    landed = merge_into_base(repo, "agentq/1", "main")
+    landed = merge_into_base(repo, "mergerail/1", "main")
     assert landed.ok and landed.kind == "merge"
     assert (repo / "one.txt").exists()
 
@@ -83,7 +83,7 @@ def test_validated_merge_checks_the_combined_tree_before_moving_base(
     repo: Path, tmp_path: Path
 ) -> None:
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1", "main")
+    worktree.reset("mergerail/1", "main")
     (worktree.path / "agent.txt").write_text("agent", encoding="utf-8")
     worktree.commit_all("agent work")
     approved = worktree.head()
@@ -99,7 +99,7 @@ def test_validated_merge_checks_the_combined_tree_before_moving_base(
 
     landed = merge_into_base(
         repo,
-        "agentq/1",
+        "mergerail/1",
         "main",
         commit=approved,
         validate=validate,
@@ -112,14 +112,14 @@ def test_validated_merge_checks_the_combined_tree_before_moving_base(
 
 def test_failed_integration_checks_leave_base_untouched(repo: Path, tmp_path: Path) -> None:
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1", "main")
+    worktree.reset("mergerail/1", "main")
     (worktree.path / "agent.txt").write_text("agent", encoding="utf-8")
     worktree.commit_all("agent work")
     before = git("rev-parse", "main", cwd=repo)
 
     landed = merge_into_base(
         repo,
-        "agentq/1",
+        "mergerail/1",
         "main",
         validate=lambda _path: (False, "combined suite failed"),
         integration_path=tmp_path / "integration",
@@ -133,7 +133,7 @@ def test_failed_integration_checks_leave_base_untouched(repo: Path, tmp_path: Pa
 
 def test_merge_refuses_when_the_checkout_is_elsewhere(repo: Path) -> None:
     run("checkout", "-qb", "somewhere-else", cwd=repo)
-    landed = merge_into_base(repo, "agentq/1", "main")
+    landed = merge_into_base(repo, "mergerail/1", "main")
     assert landed.ok is False
     assert "somewhere-else" in landed.reason
     assert current_branch(repo) == "somewhere-else"
@@ -141,13 +141,13 @@ def test_merge_refuses_when_the_checkout_is_elsewhere(repo: Path) -> None:
 
 def test_merge_refuses_a_dirty_checkout(repo: Path, tmp_path: Path) -> None:
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1", "main")
+    worktree.reset("mergerail/1", "main")
     (worktree.path / "one.txt").write_text("done", encoding="utf-8")
     worktree.commit_all("work")
     # Somebody is mid-thought in the main checkout; their work is theirs.
     (repo / "README.md").write_text("half-written\n", encoding="utf-8")
 
-    landed = merge_into_base(repo, "agentq/1", "main")
+    landed = merge_into_base(repo, "mergerail/1", "main")
     assert landed.ok is False
     assert "uncommitted" in landed.reason
     assert (repo / "README.md").read_text(encoding="utf-8") == "half-written\n"
@@ -156,13 +156,13 @@ def test_merge_refuses_a_dirty_checkout(repo: Path, tmp_path: Path) -> None:
 def test_without_a_remote_a_pr_is_impossible_and_says_so(repo: Path, tmp_path: Path) -> None:
     assert remote_url(repo) == ""
     worktree = Worktree(repo, tmp_path / "wt")
-    worktree.reset("agentq/1", "main")
+    worktree.reset("mergerail/1", "main")
     (worktree.path / "one.txt").write_text("done", encoding="utf-8")
     worktree.commit_all("work")
     run("checkout", "-qb", "elsewhere", cwd=repo)
 
     # Explicit PR mode reports its missing prerequisite.
-    landed = land(repo, Task(id=1, text="x"), "agentq/1", "main", "auto", "summary", "review")
+    landed = land(repo, Task(id=1, text="x"), "mergerail/1", "main", "auto", "summary", "review")
     assert landed == Landing(False, "", landed.reason, stage="preflight")
     assert "elsewhere" in landed.reason
 

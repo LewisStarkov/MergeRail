@@ -88,7 +88,7 @@ class Usage:
 class AgentReply:
     """The normalized final result of one agent turn.
 
-    The first six fields retain the original ``agentq.agent.AgentReply``
+    The first six fields retain the original ``mergerail.agent.AgentReply``
     constructor, so existing embedders can adopt the backend API gradually.
     """
 

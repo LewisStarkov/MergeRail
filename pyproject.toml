@@ -1,5 +1,5 @@
 [project]
-name = "agentq"
+name = "mergerail"
 version = "0.1.0"
 description = "Queue coding tasks across agent CLIs, review the result, and deliver it safely."
 readme = "README.md"
@@ -22,14 +22,26 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-agentq = "agentq.cli:main"
+mergerail = "mergerail.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentq"]
+packages = ["src/mergerail"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/LICENSE",
+  "/README.md",
+  "/docs",
+  "/mergerail.toml",
+  "/pyproject.toml",
+  "/src",
+  "/tests",
+  "/uv.lock",
+]
 
 [dependency-groups]
 dev = ["mypy>=1.11", "pytest>=8", "pytest-cov>=6", "ruff>=0.6"]
@@ -48,11 +60,11 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=agentq"
+addopts = "-q --cov=mergerail"
 
 [tool.coverage.run]
 branch = true
-source = ["agentq"]
+source = ["mergerail"]
 
 [tool.coverage.report]
 fail_under = 80

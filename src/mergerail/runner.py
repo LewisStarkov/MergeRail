@@ -78,7 +78,7 @@ class Runner:
         if config is None:
             start = Path.cwd()
             if not is_repo(start):
-                raise SystemExit(f"agentq: {start} is not inside a git repository")
+                raise SystemExit(f"mergerail: {start} is not inside a git repository")
             config = Config.load(repo_root(start))
         self.config = config
         self.store = TaskStore(self.config.queue_path)
@@ -121,13 +121,13 @@ class Runner:
                 self.config, self.fixer_backend, self.reviewer_backend
             )
         except ValueError as exc:
-            raise SystemExit(f"agentq: {exc}") from exc
+            raise SystemExit(f"mergerail: {exc}") from exc
 
     def _validate_budget(self, fixer: str, reviewer: str) -> None:
         try:
             self._validate_candidate_budget(self.config, fixer, reviewer)
         except ValueError as exc:
-            raise SystemExit(f"agentq: {exc}") from exc
+            raise SystemExit(f"mergerail: {exc}") from exc
 
     def _make_agent(
         self,
@@ -206,7 +206,7 @@ class Runner:
         try:
             return self._resolve_backend_for(self.config, requested)
         except ValueError as exc:
-            raise SystemExit(f"agentq: {exc}") from exc
+            raise SystemExit(f"mergerail: {exc}") from exc
 
     def _resolve_backend_for(self, config: Config, requested: str) -> str:
         choices = config.backend_order if requested in ("", "auto") else [requested]
@@ -268,7 +268,7 @@ class Runner:
                 reviewer = self._resolve_backend_for(candidate, candidate.reviewer.backend)
                 self._validate_candidate_security(candidate, fixer, reviewer)
                 self._validate_candidate_budget(candidate, fixer, reviewer)
-                progress("saving", "Writing agentq.toml atomically")
+                progress("saving", "Writing mergerail.toml atomically")
                 write_config(candidate)
                 ensure_state_ignored(candidate.root)
                 progress("activating", "Switching the runner to the new agent roles")
@@ -333,7 +333,7 @@ class Runner:
         try:
             run_id = self.lease.acquire()
         except RunnerBusy as exc:
-            raise SystemExit(f"agentq: {exc}") from exc
+            raise SystemExit(f"mergerail: {exc}") from exc
         self.store.claimant = run_id
         self.front.store.claimant = run_id
         try:
@@ -401,7 +401,7 @@ class Runner:
             reason = (
                 "they remain visible as known failures for this session"
                 if config.baseline_mode == "compare"
-                else "they fail on the clean base — fix them and restart agentq"
+                else "they fail on the clean base — fix them and restart mergerail"
             )
             log.warn(
                 "checks.failing_on_base",
@@ -410,7 +410,7 @@ class Runner:
             )
         if config.baseline_mode == "strict" and failing:
             names = ", ".join(check.name for check in failing)
-            raise SystemExit(f"agentq: baseline checks fail in strict mode: {names}")
+            raise SystemExit(f"mergerail: baseline checks fail in strict mode: {names}")
         if config.baseline_mode == "compare":
             self.allowed_check_failures = frozenset(check.name for check in failing)
             return list(config.checks)
@@ -716,7 +716,7 @@ class Runner:
         if self._cancel_requested(task.id):
             self._cancel_task(task)
             return None
-        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentq-turn") as pool:
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="mergerail-turn") as pool:
             future = pool.submit(session.ask, request)
             while True:
                 try:
@@ -981,7 +981,7 @@ class Runner:
             f"Commit: `{task.delivery.commit}`\n"
             f"Stage: `{task.delivery.stage or 'preflight'}`\n"
             f"Reason: {reason}\n"
-            f"Retry only delivery with `agentq retry-delivery {task.id}`."
+            f"Retry only delivery with `mergerail retry-delivery {task.id}`."
         )
 
     def _record_delivery_stage(self, task_id: int, stage: str) -> None:
@@ -1007,7 +1007,7 @@ class Runner:
         if not self.worktree.is_dirty():
             return
         log.warn("runner.uncommitted_leftovers", task=task.id)
-        self.worktree.commit_all(f"agentq #{task.id}: uncommitted leftovers from the agent")
+        self.worktree.commit_all(f"mergerail #{task.id}: uncommitted leftovers from the agent")
 
     # --- telling whoever asked ------------------------------------------
 

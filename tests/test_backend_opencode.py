@@ -5,9 +5,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from agentq.backends import opencode
-from agentq.backends.base import SessionSpec, TurnRequest
-from agentq.backends.process import JsonlProcessResult
+from mergerail.backends import opencode
+from mergerail.backends.base import SessionSpec, TurnRequest
+from mergerail.backends.process import JsonlProcessResult
 
 
 def test_opencode_builds_resume_model_agent_and_permission_options(repo: Path) -> None:

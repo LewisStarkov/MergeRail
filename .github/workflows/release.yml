@@ -24,7 +24,7 @@ jobs:
       - name: Verify tag matches package version
         shell: bash
         run: |
-          package_version="$(uv run python -c 'import importlib.metadata; print(importlib.metadata.version("agentq"))')"
+          package_version="$(uv run python -c 'import importlib.metadata; print(importlib.metadata.version("mergerail"))')"
           test "${GITHUB_REF_NAME}" = "v${package_version}"
       - run: uv build
       - run: uv run --with twine twine check dist/*

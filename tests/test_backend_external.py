@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from agentq.backends.base import SessionSpec, TurnRequest
-from agentq.backends.external import ExternalBackend, ProtocolError
+from mergerail.backends.base import SessionSpec, TurnRequest
+from mergerail.backends.external import ExternalBackend, ProtocolError
 
 DRIVER = r"""
 import json

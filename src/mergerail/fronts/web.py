@@ -1,6 +1,6 @@
 """A web page on localhost, for everyone a chat does not reach.
 
-``agentq --web`` serves one page at ``http://127.0.0.1:8788``: a box to write
+``mergerail --web`` serves one page at ``http://127.0.0.1:8788``: a box to write
 the task in, the queue underneath, a file picker for screenshots. Durable task
 state stays in the shared JSON queue; transient agent output reaches the page
 through a local server-sent event stream.
@@ -59,7 +59,7 @@ MAX_MESSAGE_PAGE = 200
 MAX_MESSAGE_TEXT_CHARS = 100_000
 MAX_IDEMPOTENCY_KEY_CHARS = 200
 
-SESSION_COOKIE = "agentq_session"
+SESSION_COOKIE = "mergerail_session"
 
 ACTION = re.compile(r"/api/tasks/(\d+)/(retry|retry-task|retry-delivery|cancel|close|delete)")
 MESSAGES = re.compile(r"/api/tasks/(\d+)/messages")
@@ -120,7 +120,7 @@ class WebFront(Front):
     def start(self) -> None:
         if self.host not in LOCAL_HOSTS and not self.auth_enabled and not self.unsafe_expose:
             raise SystemExit(
-                "agentq: refusing to expose the web front without authentication; "
+                "mergerail: refusing to expose the web front without authentication; "
                 "configure web credentials or pass --unsafe-expose"
             )
         front = self
@@ -135,7 +135,7 @@ class WebFront(Front):
             self.server = ThreadingHTTPServer((self.host, self.port), Handler)
         except OSError as exc:
             raise SystemExit(
-                f"agentq: cannot serve the web front on {self.host}:{self.port} — {exc}"
+                f"mergerail: cannot serve the web front on {self.host}:{self.port} — {exc}"
             ) from exc
         self.port = self.server.server_address[1]
         self.server.daemon_threads = True

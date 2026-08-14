@@ -1,7 +1,7 @@
 """Settings, in the order of who knows best.
 
 Detected first, because the repository already contains the answers. Then
-``agentq.toml``, which is where a wrong guess gets corrected once. Then the
+``mergerail.toml``, which is where a wrong guess gets corrected once. Then the
 environment, for the things that differ between machines and must not be
 committed. Nothing is required: running the tool in a repository with no config
 at all is the case this file exists to make work.
@@ -27,12 +27,12 @@ from .delivery import AUTO
 from .detect import Check, convention_files, detect_checks
 from .gitctl import detect_base_branch
 
-CONFIG_NAME = "agentq.toml"
-EXTERNAL_BACKEND_PROTOCOL = "agentq-jsonl-v1"
+CONFIG_NAME = "mergerail.toml"
+EXTERNAL_BACKEND_PROTOCOL = "mergerail-jsonl-v1"
 
 
 def _env(name: str) -> str:
-    return os.environ.get(f"AGENTQ_{name.upper()}", "").strip()
+    return os.environ.get(f"MERGERAIL_{name.upper()}", "").strip()
 
 
 @dataclass(slots=True)
@@ -75,7 +75,7 @@ class Config:
     effort: str = ""
     #: The whole task's budget in dollars, all rounds of both agents. 0 = none.
     max_usd: float = 0.0
-    branch_prefix: str = "agentq"
+    branch_prefix: str = "mergerail"
     #: Which Claude settings the agents load. ``project`` keeps the operator's
     #: own MCP servers and plugins out of the agents' context; ``all`` loads
     #: everything the interactive CLI would.
@@ -156,7 +156,9 @@ class Config:
         raw = read_config_file(root / CONFIG_NAME)
         # The environment first, like everywhere else: it is the machine's own
         # answer, and the machine knows best where its state may live.
-        state_dir = Path(_env("state_dir") or str(raw.get("state_dir") or "") or root / ".agentq")
+        state_dir = Path(
+            _env("state_dir") or str(raw.get("state_dir") or "") or root / ".mergerail"
+        )
         if not state_dir.is_absolute():
             state_dir = root / state_dir
 
@@ -383,7 +385,7 @@ def _apply_env(config: Config) -> None:
 def render_config(config: Config) -> str:
     """The detected settings, as a file a person can edit."""
     lines = [
-        "# agentq — written by `agentq init` from what this repository looks like.",
+        "# MergeRail — written by `mergerail init` from what this repository looks like.",
         "# Everything here is optional; delete a line to go back to the detected value.",
         "",
         f'base_branch = "{config.base_branch}"',
@@ -442,13 +444,13 @@ def render_config(config: Config) -> str:
         lines.append("")
     lines += [
         "# [telegram]",
-        '# token = ""      # or AGENTQ_TELEGRAM_TOKEN in the environment',
+        '# token = ""      # or MERGERAIL_TELEGRAM_TOKEN in the environment',
         "# admins = []     # numeric ids; empty means the first /start claims the bot",
         "",
         "# [web]",
         '# host = "127.0.0.1"',
         "# port = 8788",
-        '# username = "agentq"   # use AGENTQ_WEB_PASSWORD for the secret',
+        '# username = "mergerail"   # use MERGERAIL_WEB_PASSWORD for the secret',
         "# session_ttl = 28800",
         "# max_sse_clients = 16",
         "",
@@ -474,10 +476,10 @@ def ensure_state_ignored(root: Path) -> bool:
         current = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         current = ""
-    if any(line.strip().rstrip("/") == ".agentq" for line in current.splitlines()):
+    if any(line.strip().rstrip("/") == ".mergerail" for line in current.splitlines()):
         return False
     lead = "" if not current or current.endswith("\n") else "\n"
-    write_atomic(path, f"{current}{lead}.agentq/\n")
+    write_atomic(path, f"{current}{lead}.mergerail/\n")
     return True
 
 

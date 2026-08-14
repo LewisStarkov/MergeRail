@@ -2,7 +2,7 @@
 
 ## Initial operating context
 
-Run `agentq init` in an interactive terminal before the first task. The short
+Run `mergerail init` in an interactive terminal before the first task. The short
 wizard records one agent for both roles, target environment, current objective
 and external-action policy. Both agents receive the resulting `[project]`
 section in their system prompt, so a
@@ -12,7 +12,7 @@ For scripts and reproducible setup, pass the same answers as flags and suppress
 questions explicitly:
 
 ```bash
-agentq init --agent codex --reviewer-agent claude \
+mergerail init --agent codex --reviewer-agent claude \
   --environment production --work-mode incident \
   --project-summary "restore payment processing" \
   --external-actions ask --constraint "preserve audit logs" \
@@ -31,13 +31,13 @@ change midway through a run.
 
 ## Recovery and cancellation
 
-AgentQ takes `.agentq/runner.lock` before baseline checks or front startup. A
+MergeRail takes `.mergerail/runner.lock` before baseline checks or front startup. A
 second runner exits with the recorded owner metadata instead of competing for
 tasks. If a runner dies, its operating-system lock is released automatically;
 the next runner requeues tasks left in `running` or `review`, clears their old
 claims, and retains the abandoned attempt branch in task history.
 
-`agentq cancel ID` immediately cancels queued work. Active fixer, reviewer and
+`mergerail cancel ID` immediately cancels queued work. Active fixer, reviewer and
 check processes receive process-tree termination followed by a forced kill if
 they outlive the grace period. Partial work is committed to the attempt branch
 before the task is marked `cancelled`. Delivery that has already been approved
@@ -48,9 +48,9 @@ must be allowed to finish or repaired with `retry-delivery`.
 Queue updates are serialized across processes and replaced atomically. Invalid
 JSON stops mutations and is copied to a timestamped `tasks.corrupt-*.json` file
 for inspection. Fix the original queue or restore a known-good copy, then run
-`agentq doctor` before restarting the runner.
+`mergerail doctor` before restarting the runner.
 
-Task discussions are append-only journals under `.agentq/threads/`. Message
+Task discussions are append-only journals under `.mergerail/threads/`. Message
 status changes are appended as events and folded on read, so an interrupted
 runner can return `processing` messages to `pending` without rewriting the
 thread. Resumable backend session ids and previous execution snapshots live in
@@ -62,17 +62,17 @@ The audit journal rotates at 5 MiB and keeps three backups by default. Task
 history can be compacted without losing terminal records:
 
 ```bash
-agentq archive --keep 100
-agentq events --limit 200
-agentq doctor --run-checks
+mergerail archive --keep 100
+mergerail events --limit 200
+mergerail doctor --run-checks
 ```
 
-Archived tasks are appended to `.agentq/tasks.archive.jsonl`; the newest 100
+Archived tasks are appended to `.mergerail/tasks.archive.jsonl`; the newest 100
 terminal tasks remain in the hot queue in this example.
 
 ## Local delivery
 
-Approved work is merged with the current base in `.agentq/integration`, where
+Approved work is merged with the current base in `.mergerail/integration`, where
 the active check set runs against the combined tree. The checked-out base is
 advanced only if those checks pass and the base remained clean and unchanged
 during validation. A conflict, check failure or concurrently moved base leaves
@@ -86,12 +86,12 @@ credentials and keep the password in the environment:
 ```toml
 [web]
 host = "0.0.0.0"
-username = "agentq"
+username = "mergerail"
 ```
 
 ```bash
-export AGENTQ_WEB_PASSWORD='use-a-secret-manager-in-production'
-agentq run --web
+export MERGERAIL_WEB_PASSWORD='use-a-secret-manager-in-production'
+mergerail run --web
 ```
 
 `--unsafe-expose` bypasses this safeguard and should only be used behind an

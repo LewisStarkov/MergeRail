@@ -1,4 +1,4 @@
-"""Exclusive ownership of the repository's AgentQ runner."""
+"""Exclusive ownership of the repository's MergeRail runner."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ class RunnerLease:
             owner = self._owner(handle)
             handle.close()
             detail = f" ({owner})" if owner else ""
-            raise RunnerBusy(f"another agentq runner owns {self.path}{detail}")
+            raise RunnerBusy(f"another mergerail runner owns {self.path}{detail}")
 
         self.run_id = uuid4().hex
         record = {

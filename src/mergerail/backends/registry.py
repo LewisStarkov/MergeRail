@@ -8,9 +8,9 @@ from collections.abc import Iterable
 from .base import AgentBackend, AgentSession, BackendInfo, EventSink, SessionSpec
 
 _BUILTINS = (
-    ("agentq.backends.claude", "ClaudeBackend"),
-    ("agentq.backends.codex", "CodexBackend"),
-    ("agentq.backends.opencode", "OpenCodeBackend"),
+    ("mergerail.backends.claude", "ClaudeBackend"),
+    ("mergerail.backends.codex", "CodexBackend"),
+    ("mergerail.backends.opencode", "OpenCodeBackend"),
 )
 
 

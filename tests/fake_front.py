@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from agentq.config import Config
-from agentq.fronts.base import Front
-from agentq.tasks import Task, TaskStore
+from mergerail.config import Config
+from mergerail.fronts.base import Front
+from mergerail.tasks import Task, TaskStore
 
 
 class EchoFront(Front):

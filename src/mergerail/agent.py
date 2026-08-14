@@ -1,7 +1,7 @@
 """Compatibility imports for the original Claude-only agent API.
 
 New integrations should import the provider-neutral contracts from
-``agentq.backends`` and obtain sessions through a backend registry.
+``mergerail.backends`` and obtain sessions through a backend registry.
 """
 
 from __future__ import annotations

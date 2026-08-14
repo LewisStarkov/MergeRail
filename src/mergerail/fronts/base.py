@@ -11,9 +11,9 @@ front that has its own queue (an issue tracker, say) overrides ``next_task``.
 
 A third-party front is a subclass named as ``mypackage.fronts:SlackFront`` in
 the config (or ``--front``); it is constructed as ``Class(store, config)``, so
-its ``__init__`` must take the :class:`~agentq.tasks.TaskStore` and the
-:class:`~agentq.config.Config` — everything else it needs (a token, a URL)
-belongs in its own section of ``agentq.toml``, reachable via ``config.front``.
+its ``__init__`` must take the :class:`~mergerail.tasks.TaskStore` and the
+:class:`~mergerail.config.Config` — everything else it needs (a token, a URL)
+belongs in its own section of ``mergerail.toml``, reachable via ``config.front``.
 """
 
 from __future__ import annotations

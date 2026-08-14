@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agentq.fronts.base import StreamEvent
-from agentq.fronts.folder import FolderFront
-from agentq.fronts.telegram import HELP, TelegramFront
-from agentq.tasks import Status, Task, TaskStore
+from mergerail.fronts.base import StreamEvent
+from mergerail.fronts.folder import FolderFront
+from mergerail.fronts.telegram import HELP, TelegramFront
+from mergerail.tasks import Status, Task, TaskStore
 
 
 class Recording(TelegramFront):
@@ -238,7 +238,7 @@ class SetupStub:
     def apply_setup(self, payload: Any, progress: Any) -> tuple[int, dict[str, Any]]:
         self.received = dict(payload)
         progress("validating", "Checking answers")
-        progress("saving", "Writing agentq.toml")
+        progress("saving", "Writing mergerail.toml")
         progress("complete", "Ready")
         return 200, {"ok": True}
 

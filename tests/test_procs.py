@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agentq import procs
+from mergerail import procs
 
 
 def test_kill_tree_ends_a_spawned_process(tmp_path: Path) -> None:

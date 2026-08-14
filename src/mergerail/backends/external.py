@@ -33,11 +33,11 @@ DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024
 
 
 class ProtocolError(RuntimeError):
-    """The driver violated ``agentq-jsonl-v1``."""
+    """The driver violated ``mergerail-jsonl-v1``."""
 
 
 class ExternalBackend:
-    """An explicitly configured executable implementing ``agentq-jsonl-v1``."""
+    """An explicitly configured executable implementing ``mergerail-jsonl-v1``."""
 
     def __init__(
         self,
@@ -166,7 +166,7 @@ class ExternalSession:
             {
                 "type": "hello",
                 "protocol": PROTOCOL_VERSION,
-                "agentq_version": _agentq_version(),
+                "mergerail_version": _mergerail_version(),
             }
         )
         event = self._read_frame(timeout)
@@ -390,9 +390,9 @@ def _result_error(event: dict[str, Any]) -> str:
     return _string(event.get("message") or error) or "external driver failed"
 
 
-def _agentq_version() -> str:
+def _mergerail_version() -> str:
     try:
-        return metadata.version("agentq")
+        return metadata.version("mergerail")
     except metadata.PackageNotFoundError:
         return "0.1.0"
 

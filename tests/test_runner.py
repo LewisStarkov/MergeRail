@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from agentq.backends import (
+from mergerail.backends import (
     AgentReply,
     BackendCapabilities,
     BackendInfo,
@@ -24,11 +24,11 @@ from agentq.backends import (
     SessionSpec,
     TurnRequest,
 )
-from agentq.config import Config
-from agentq.detect import Check
-from agentq.fronts.base import Front, StreamEvent
-from agentq.runner import Runner
-from agentq.tasks import Status, Task, TaskStore
+from mergerail.config import Config
+from mergerail.detect import Check
+from mergerail.fronts.base import Front, StreamEvent
+from mergerail.runner import Runner
+from mergerail.tasks import Status, Task, TaskStore
 
 APPROVE = "VERDICT: APPROVE"
 REJECT = "VERDICT: REJECT"
@@ -361,7 +361,7 @@ def test_setup_persists_context_and_switches_roles_without_restart(
         "summary",
         "external_actions",
     }
-    saved = (repo / "agentq.toml").read_text(encoding="utf-8")
+    saved = (repo / "mergerail.toml").read_text(encoding="utf-8")
     assert 'summary = "prepare the release"' in saved
     assert 'constraints = ["preserve the API"]' in saved
 
@@ -547,7 +547,7 @@ def test_an_unmergeable_landing_is_blocked_with_the_branch_intact(
 
     final = worked(runner, "do the thing")
     assert final.status == Status.BLOCKED
-    assert final.branch == f"agentq/{final.id}/a1"
+    assert final.branch == f"mergerail/{final.id}/a1"
 
 
 # --- run(until=...) ------------------------------------------------------
@@ -586,7 +586,7 @@ def test_run_recovers_review_work_on_a_new_attempt(
     runner.store.update(
         task.id,
         status=Status.REVIEW,
-        branch="agentq/1/a1",
+        branch="mergerail/1/a1",
         claimed_by="dead-runner",
     )
     fixer.turns = [says("ANSWER: recovered")]
@@ -597,7 +597,7 @@ def test_run_recovers_review_work_on_a_new_attempt(
     assert recovered is not None
     assert recovered.status == Status.DONE
     assert recovered.attempts == 1
-    assert recovered.previous_branches == ["agentq/1/a1"]
+    assert recovered.previous_branches == ["mergerail/1/a1"]
     assert recovered.claimed_by == ""
     assert any(event["event"] == "task.recovered" for event in runner.audit.read(task=task.id))
 
@@ -627,6 +627,6 @@ def test_active_turn_can_be_cancelled_and_preserves_the_branch(
     cancelled = runner.store.get(task.id)
     assert cancelled is not None
     assert cancelled.status == Status.CANCELLED
-    assert cancelled.branch == "agentq/1/a1"
+    assert cancelled.branch == "mergerail/1/a1"
     assert (runner.worktree.path / "partial.txt").exists()
     assert any(event["event"] == "task.cancelled" for event in runner.audit.read(task=task.id))

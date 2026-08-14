@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentq.streaming import normalize_agent_event
+from mergerail.streaming import normalize_agent_event
 
 
 def test_claude_text_and_tool_events_are_normalized() -> None:

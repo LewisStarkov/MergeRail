@@ -1,4 +1,4 @@
-"""``agentq`` — the whole thing, from a directory that happens to be a repository."""
+"""``mergerail`` — the whole thing, from a directory that happens to be a repository."""
 
 from __future__ import annotations
 
@@ -21,14 +21,14 @@ from .share import NgrokTunnel, Share
 from .tasks import QueueCorruptError, Status, TaskStore
 
 USAGE = """\
-  agentq                     work the queue, tasks arrive as files in .agentq/inbox
-  agentq --telegram          work the queue, tasks arrive from a Telegram bot
-  agentq --web               work the queue, tasks arrive from a page on localhost
-  agentq add "fix the …"     put one task on the queue and exit
-  agentq once "fix the …"    put one task on the queue, work until it settles, exit
-  agentq list                show the queue
-  agentq init                write agentq.toml with what this repository looks like
-  agentq doctor              say whether this repository is ready, and what would run
+  mergerail                     work the queue, tasks arrive as files in .mergerail/inbox
+  mergerail --telegram          work the queue, tasks arrive from a Telegram bot
+  mergerail --web               work the queue, tasks arrive from a page on localhost
+  mergerail add "fix the …"     put one task on the queue and exit
+  mergerail once "fix the …"    put one task on the queue, work until it settles, exit
+  mergerail list                show the queue
+  mergerail init                write mergerail.toml with what this repository looks like
+  mergerail doctor              say whether this repository is ready, and what would run
 """
 
 COMMANDS = (
@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--log-level", default="INFO")
 
     parser = argparse.ArgumentParser(
-        prog="agentq",
+        prog="mergerail",
         description="Write the task down; an agent does it, a reviewer checks it, it lands.",
         epilog=USAGE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -119,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     initialize = commands.add_parser(
-        "init", parents=[common], help="ask about the project and write agentq.toml"
+        "init", parents=[common], help="ask about the project and write mergerail.toml"
     )
     _add_agent_flags(initialize)
     initialize.add_argument(
@@ -197,11 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve(args: argparse.Namespace) -> Config:
     start = Path(args.path).expanduser().resolve()
     if not is_repo(start):
-        raise SystemExit(f"agentq: {start} is not a git repository")
+        raise SystemExit(f"mergerail: {start} is not a git repository")
     try:
         config = Config.load(repo_root(start))
     except ValueError as error:
-        raise SystemExit(f"agentq: invalid {CONFIG_NAME}: {error}") from error
+        raise SystemExit(f"mergerail: invalid {CONFIG_NAME}: {error}") from error
     if getattr(args, "delivery", ""):
         config.delivery = args.delivery
     if getattr(args, "model", ""):
@@ -283,7 +283,7 @@ def doctor(config: Config, *, run_checks: bool = False) -> int:
         f"security     {'strict' if config.strict_security else 'compatible'}",
     )
     lines += [f"  {check.name:12} {' '.join(check.command)}" for check in config.checks] or [
-        "  (none detected — add [[checks]] to agentq.toml)"
+        "  (none detected — add [[checks]] to mergerail.toml)"
     ]
     if config.process:
         lines.append(f"process      {' '.join(config.process)}")
@@ -304,7 +304,7 @@ def doctor(config: Config, *, run_checks: bool = False) -> int:
             print("\na check that fails on the base would fail every task — fix it first.")
     if backend_errors:
         for error in backend_errors:
-            log.error("agentq.backend_unavailable", reason=error)
+            log.error("mergerail.backend_unavailable", reason=error)
     return 0 if not backend_errors and has_commits(config.root) and healthy else 1
 
 
@@ -353,18 +353,18 @@ def _strict_security_errors(
 def init(config: Config, *, interactive: bool = False) -> int:
     target = config.root / CONFIG_NAME
     if target.exists():
-        print(f"agentq: {target} already exists — leaving it alone")
+        print(f"mergerail: {target} already exists — leaving it alone")
     else:
         if interactive:
             _init_wizard(config)
         write_config(config)
-        print(f"agentq: wrote {target}")
+        print(f"mergerail: wrote {target}")
     ensure_ignored(config.root)
     return 0
 
 
 def _init_wizard(config: Config) -> None:
-    print("agentq: initial setup (press Enter to accept each default)")
+    print("mergerail: initial setup (press Enter to accept each default)")
     backends = list(
         dict.fromkeys(
             [
@@ -400,7 +400,7 @@ def _ask_choice(label: str, choices: list[str], default: str) -> str:
         answer = _ask_text(f"{label} ({options})", default)
         if answer in choices:
             return answer
-        print(f"agentq: choose one of: {', '.join(choices)}")
+        print(f"mergerail: choose one of: {', '.join(choices)}")
 
 
 def _ask_text(label: str, default: str = "") -> str:
@@ -415,7 +415,7 @@ def _ask_text(label: str, default: str = "") -> str:
 def ensure_ignored(root: Path) -> None:
     """State does not belong in history; say so once in .gitignore."""
     if ensure_state_ignored(root):
-        print("agentq: added .agentq/ to .gitignore")
+        print("mergerail: added .mergerail/ to .gitignore")
 
 
 def add(config: Config, text: str) -> int:
@@ -442,7 +442,7 @@ def show_queue(config: Config) -> int:
 def show_task(config: Config, task_id: int) -> int:
     task = TaskStore(config.queue_path).get(task_id)
     if task is None:
-        print(f"agentq: no task #{task_id}")
+        print(f"mergerail: no task #{task_id}")
         return 1
     print(f"{task.icon} #{task.id} {task.status}: {task.title}")
     if task.branch:
@@ -461,7 +461,7 @@ def show_task(config: Config, task_id: int) -> int:
 def retry_task(config: Config, task_id: int) -> int:
     task = TaskStore(config.queue_path).retry_task(task_id)
     if task is None:
-        print(f"agentq: task #{task_id} cannot be retried")
+        print(f"mergerail: task #{task_id} cannot be retried")
         return 1
     print(f"🕓 #{task_id} back in the queue; previous branches were preserved")
     return 0
@@ -470,7 +470,7 @@ def retry_task(config: Config, task_id: int) -> int:
 def retry_delivery(config: Config, task_id: int) -> int:
     task = TaskStore(config.queue_path).retry_delivery(task_id)
     if task is None:
-        print(f"agentq: task #{task_id} has no recoverable approved delivery")
+        print(f"mergerail: task #{task_id} has no recoverable approved delivery")
         return 1
     print(f"🟢 #{task_id} delivery queued for commit {task.approved_sha}")
     return 0
@@ -479,7 +479,7 @@ def retry_delivery(config: Config, task_id: int) -> int:
 def cancel_task(config: Config, task_id: int) -> int:
     task = TaskStore(config.queue_path).request_cancel(task_id)
     if task is None:
-        print(f"agentq: task #{task_id} cannot be cancelled")
+        print(f"mergerail: task #{task_id} cannot be cancelled")
         return 1
     print(f"🚫 #{task_id} {'cancelled' if task.status == Status.CANCELLED else 'cancelling'}")
     return 0
@@ -487,11 +487,11 @@ def cancel_task(config: Config, task_id: int) -> int:
 
 def archive_tasks(config: Config, *, keep: int) -> int:
     if keep < 0:
-        print("agentq: --keep must be zero or greater")
+        print("mergerail: --keep must be zero or greater")
         return 1
     store = TaskStore(config.queue_path)
     count = store.archive(keep=keep)
-    print(f"agentq: archived {count} task(s) to {store.archive_path}")
+    print(f"mergerail: archived {count} task(s) to {store.archive_path}")
     return 0
 
 
@@ -513,7 +513,7 @@ def show_events(
     if json_output:
         print(json.dumps(records, ensure_ascii=False, indent=2))
     elif not records:
-        print("agentq: no audit events")
+        print("mergerail: no audit events")
     else:
         for record in records:
             fields = " ".join(
@@ -533,7 +533,7 @@ def once(config: Config, text: str) -> int:
         return 1
     runner = Runner(config, "folder", supervise=False)
     task = runner.store.add(text, source="cli")
-    log.info("agentq.once", task=task.id)
+    log.info("mergerail.once", task=task.id)
     runner.run(until=task.id)
     final = runner.store.get(task.id)
     if final is None:
@@ -549,12 +549,12 @@ def preflight(config: Config) -> bool:
     selected, errors = _selected_backends(config, registry)
     if errors:
         for reason in errors:
-            log.error("agentq.backend_unavailable", reason=reason)
+            log.error("mergerail.backend_unavailable", reason=reason)
         return False
     security_errors = _strict_security_errors(config, selected, registry)
     if security_errors:
         for reason in security_errors:
-            log.error("agentq.security_unsupported", reason=reason)
+            log.error("mergerail.security_unsupported", reason=reason)
         return False
     if config.max_usd > 0:
         unsupported: list[str] = []
@@ -565,14 +565,14 @@ def preflight(config: Config) -> bool:
                 unsupported.append(f"{role}={name}")
         if unsupported:
             log.error(
-                "agentq.budget_unsupported",
+                "mergerail.budget_unsupported",
                 backends=",".join(unsupported),
                 reason="exact USD cost is not reported",
             )
             return False
     if config.fixer.permission == "skip":
         log.warn(
-            "agentq.permissions_bypassed — the fixer runs without sandbox or approval checks "
+            "mergerail.permissions_bypassed — the fixer runs without sandbox or approval checks "
             "inside its worktree"
         )
     return True
@@ -584,12 +584,12 @@ def _share(args: argparse.Namespace, config: Config, front: str) -> Share | None
     unsafe = bool(getattr(args, "share_unsafe", False))
     if not requested:
         if policy_arg or unsafe:
-            raise SystemExit("agentq: --share-policy and --share-unsafe require --share ngrok")
+            raise SystemExit("mergerail: --share-policy and --share-unsafe require --share ngrok")
         return None
     if front != "web":
-        raise SystemExit("agentq: --share ngrok requires the web front")
+        raise SystemExit("mergerail: --share ngrok requires the web front")
     if policy_arg and unsafe:
-        raise SystemExit("agentq: --share-policy and --share-unsafe cannot be used together")
+        raise SystemExit("mergerail: --share-policy and --share-unsafe cannot be used together")
     policy = Path(policy_arg).expanduser()
     if policy_arg and not policy.is_absolute():
         policy = config.root / policy
@@ -603,7 +603,7 @@ def _share(args: argparse.Namespace, config: Config, front: str) -> Share | None
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    # ``agentq --telegram`` has meant "run" since before there were
+    # ``mergerail --telegram`` has meant "run" since before there were
     # subcommands, and it still does.
     if not arguments:
         arguments = ["run"]
@@ -622,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return updater.relaunch(arguments)
         except updater.UpdateError as error:
-            print(f"agentq: could not restart after updating: {error}", file=sys.stderr)
+            print(f"mergerail: could not restart after updating: {error}", file=sys.stderr)
     config = resolve(args)
 
     if args.command == "init":
@@ -672,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     def stop(*_: object) -> None:
-        log.info("agentq.stopping")
+        log.info("mergerail.stopping")
         runner.stopping = True
 
     signal.signal(signal.SIGINT, stop)

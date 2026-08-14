@@ -44,7 +44,7 @@ ROW_CHARS = 80
 RECENT_MESSAGES = 3
 
 HELP = (
-    "<b>agentq</b>\n\n"
+    "<b>MergeRail</b>\n\n"
     "Send me anything — that is a task. A screenshot works too.\n\n"
     "/list — the queue\n"
     "/show &lt;id&gt; — one task in full\n"

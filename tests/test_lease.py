@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agentq.lease import RunnerBusy, RunnerLease
+from mergerail.lease import RunnerBusy, RunnerLease
 
 
 def test_runner_lease_is_exclusive_and_reusable(tmp_path: Path) -> None:

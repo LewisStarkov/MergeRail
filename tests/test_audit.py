@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentq.audit import AUDIT_SCHEMA_VERSION, AuditLog
+from mergerail.audit import AUDIT_SCHEMA_VERSION, AuditLog
 
 
 def test_audit_log_appends_filters_and_ignores_broken_lines(tmp_path: Path) -> None:

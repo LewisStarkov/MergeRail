@@ -1,16 +1,16 @@
-"""agentq — write the task down; an agent does it, a reviewer checks it, it lands.
+"""MergeRail — write the task down; an agent does it, a reviewer checks it, it lands.
 
 The short version::
 
-    uvx agentq --telegram
+    uvx mergerail --telegram
 
 The embedded version, when you want the runner to own your app process too::
 
-    from agentq import Runner
+    from mergerail import Runner
 
     Runner(front="telegram").run()
 
-Anything else is a front: implement :class:`~agentq.fronts.base.Front` and pass
+Anything else is a front: implement :class:`~mergerail.fronts.base.Front` and pass
 an instance instead of a name. Live streaming is an optional third hook.
 """
 
