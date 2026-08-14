@@ -30,6 +30,7 @@ that can use a terminal:
 
 ```text
 Set up and start MergeRail for the Git repository in the current working directory.
+MergeRail repository: https://github.com/LewisStarkov/MergeRail
 
 Preserve every existing file, uncommitted change, branch, mergerail.toml setting,
 and .mergerail/ state. Do not reset, clean, checkout, commit, or push anything.
