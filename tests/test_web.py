@@ -100,6 +100,9 @@ def test_the_page_is_served(front: WebFront) -> None:
     assert "function loadThread" in page
     assert "Send to agent" in page
     assert 'dataset.mode = "comment"' in page
+    assert "list.append(agentActivity(task.id, task.live))" in page
+    assert 'message.className = "thread-message system activity"' in page
+    assert "body.append(live(t.id, t.live))" not in page
     assert 'class="pill' not in page
     assert "bootstrap-icons@1.13.1" in page
     assert "bi bi-terminal" not in page

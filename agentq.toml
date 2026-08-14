@@ -1,0 +1,68 @@
+# agentq — written by `agentq init` from what this repository looks like.
+# Everything here is optional; delete a line to go back to the detected value.
+
+base_branch = "master"
+
+# auto: open a PR when origin exists, otherwise merge locally.
+# local / pr force one strategy; merge is a deprecated alias for local.
+delivery = "auto"
+
+max_rounds = 3          # fixer <-> reviewer rounds before giving up
+
+# A process to run and restart whenever work lands. Optional.
+# process = ""
+
+# exclude skips checks already failing on the base; compare still runs
+# them as known failures; strict refuses to start until every check passes.
+baseline_checks = true
+baseline_mode = "exclude"
+strict_security = false
+
+# max_usd = 0.0    # requires exact USD reporting from both selected backends
+
+[project]
+# This context is included in both agents' standing instructions.
+environment = "local"
+work_mode = "development"
+summary = ""
+external_actions = "forbid"
+constraints = []
+
+[agents]
+backend_order = ["claude", "codex", "opencode"]
+
+[agents.fixer]
+backend = "codex"
+model = ""
+effort = ""
+permission = "skip"
+
+[agents.reviewer]
+backend = "codex"
+model = ""
+effort = ""
+permission = "review"
+
+# Detected from this repository. Order matters; the first failure stops the round.
+[[checks]]
+name = "ruff"
+command = "uv run ruff check ."
+
+[[checks]]
+name = "mypy"
+command = "uv run mypy ."
+
+[[checks]]
+name = "pytest"
+command = "uv run pytest -q"
+
+# [telegram]
+# token = ""      # or AGENTQ_TELEGRAM_TOKEN in the environment
+# admins = []     # numeric ids; empty means the first /start claims the bot
+
+# [web]
+# host = "127.0.0.1"
+# port = 8788
+# username = "agentq"   # use AGENTQ_WEB_PASSWORD for the secret
+# session_ttl = 28800
+# max_sse_clients = 16

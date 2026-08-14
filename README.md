@@ -110,6 +110,10 @@ permission = "review"
 timeout = 1800
 ```
 
+For a trusted local fixer that must inspect Docker or host processes, set
+`permission = "skip"`. With the Codex and Claude backends this disables their
+sandbox and approval checks; reviewers remain read-only.
+
 An external driver is registered explicitly; its executable must implement
 `agentq-jsonl-v1` over stdin/stdout JSONL:
 
