@@ -792,7 +792,8 @@ def _asset(name: str) -> str:
     return files(__package__).joinpath("web_assets", name).read_text(encoding="utf-8")
 
 
-LOGIN_PAGE = _asset("login.html")
-PAGE = _asset("index.html")
+CONTROL_ROOM_CSS = _asset("control_room.css")
+PAGE = _asset("index.html").replace("{{styles}}", CONTROL_ROOM_CSS)
+LOGIN_PAGE = _asset("login.html").replace("{{styles}}", CONTROL_ROOM_CSS)
 
-__all__ = ["LOGIN_PAGE", "MAX_FILE_BYTES", "PAGE", "WebFront"]
+__all__ = ["CONTROL_ROOM_CSS", "LOGIN_PAGE", "MAX_FILE_BYTES", "PAGE", "WebFront"]
