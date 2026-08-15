@@ -109,7 +109,61 @@ def test_the_page_is_served(front: WebFront) -> None:
     assert "statusIcons" in page
     assert "${t.icon}" not in page
     assert "📎" not in page
-    assert "--accent: #0f62fe" in page
+    assert "--scene: #d9e0e1" in page
+    assert "--ink: #172022" in page
+    assert "--signal: #c83e34" in page
+    assert "--glass: #edf2f1" in page
+    assert "--glass-strong: #f7f9f8" in page
+    assert "--glass-soft: #e6eceb" in page
+    assert "--duration-fast: 120ms" in page
+    assert "--duration-base: 200ms" in page
+    assert "--duration-slow: 300ms" in page
+    assert "color-scheme: light dark" in page
+    assert "@media (prefers-color-scheme: dark)" in page
+    assert "@supports (color: light-dark(white, black))" in page
+    assert "@supports ((backdrop-filter: blur(1px))" in page
+    assert "backdrop-filter: blur(24px)" in page
+    assert "--radius-pane: 22px" in page
+    assert "--radius-composer: 18px" in page
+    assert "radial-gradient" in page
+    assert "box-shadow" in page
+    assert "@media (forced-colors: active)" in page
+    assert "transition: all" not in page
+    assert "{{styles}}" not in page
+    assert 'data-mobile-view="queue"' in page
+    assert "function setMobileView" in page
+    assert "function openComposerSheet" in page
+    assert "function submitOnEnter" in page
+    assert 'event.key !== "Enter" || event.shiftKey || event.isComposing' in page
+    assert "submitOnEnter(event, composer)" in page
+    assert "let composerSubmitting = false" in page
+    assert "if (composerSubmitting) return" in page
+    assert 'id="file-trigger"' in page
+    assert 'id="file" hidden' in page
+    assert "picker.hidden = true" in page
+    assert "element.tabIndex >= 0" in page
+    assert 'id="mobile-queue"' in page
+    assert 'id="mobile-task"' in page
+    assert 'id="mobile-new-task"' in page
+    assert 'aria-disabled="true"' in page
+    assert 'aria-modal="true"' in page
+    assert 'id="composer-backdrop"' in page
+    assert "previousTaskStates" in page
+    assert "taskStateHistoryReady" in page
+    assert 'data-motion' in page
+    assert "finalizeComposerClose" in page
+    assert "composerTransitionToken" in page
+    assert "composerSheetState" in page
+    assert "composerCloseTimer" in page
+    assert 'classList.add("is-closing")' in page
+    assert "composerSheetPanel.addEventListener(\"transitionend\"" in page
+    assert 'document.createElement("button")' in page
+    assert 'aria-current' in page
+    assert 'el.setAttribute("aria-label", label)' in page
+    assert 'if (!isMobileViewport() && !composerSheet.hidden) {' in page
+    assert 'closeComposerSheet();\n    document.getElementById("text").focus()' in page
+    assert 'document.getElementById("text").focus()' in page
+    assert 'link.rel = "noopener noreferrer"' in page
     assert "data-design" not in page
     assert "designPicker" not in page
     assert 'id="setup-form"' in page
@@ -402,9 +456,18 @@ def test_auth_uses_the_styled_login_and_protects_api_and_sse(tmp_path: Path) -> 
         with urllib.request.urlopen(root + "/", timeout=5) as response:
             page = response.read().decode("utf-8")
             assert response.url.endswith("/login")
-        assert "Open Agent Workbench" in page
+        assert "Control room locked" in page
+        assert "Enter your MergeRail web credentials" in page
+        assert "Unlock" in page
         assert "bootstrap-icons@1.13.1" in page
-        assert 'class="login-shell"' in page
+        assert "login-shell" in page
+        assert 'inert aria-label="Locked task queue"' in page
+        assert "{{styles}}" not in page
+        assert "--scene: #d9e0e1" in page
+        assert "--glass-strong: #f7f9f8" in page
+        assert "backdrop-filter: blur(24px)" in page
+        assert "radial-gradient" in page
+        assert "box-shadow" in page
 
         with pytest.raises(urllib.error.HTTPError) as denied:
             urllib.request.urlopen(root + "/api/tasks", timeout=5)

@@ -5,397 +5,114 @@
 <title>MergeRail</title>
 <link rel="stylesheet"
  href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
-<style>
-  :root {
-    --bg: #ffffff; --card: #f4f4f4; --ink: #161616; --dim: #525252;
-    --line: #e0e0e0; --accent: #0f62fe; --accent-strong: #0043ce;
-    --danger: #da1e28; --sidebar: #f4f4f4; --sidebar-panel: #ffffff;
-    --sidebar-line: #c6c6c6; --sidebar-ink: #161616; --sidebar-dim: #525252;
-    --sidebar-width: 20rem; --sidebar-rail-width: 3rem; --topbar-height: 3rem;
-  }
-  * { box-sizing: border-box; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  body {
-    margin: 0; min-height: 100vh;
-    background: var(--bg); color: var(--ink);
-    font: 14px/1.5 "Helvetica Neue", Arial, sans-serif;
-  }
-  h1 { font-size: 1.05rem; letter-spacing: -.02em; margin: 0; }
-  form {
-    background: var(--card); border: 1px solid var(--line); border-radius: 0;
-    padding: .75rem; display: grid; gap: .5rem;
-  }
-  textarea {
-    border: 0; outline: 0; resize: vertical; min-height: 3.5rem;
-    background: transparent; color: inherit; font: inherit; width: 100%;
-  }
-  .row { display: flex; align-items: center; gap: .5rem; }
-  .row input[type=file] {
-    position: absolute; width: 1px; height: 1px; overflow: hidden;
-    clip: rect(0 0 0 0); white-space: nowrap;
-  }
-  .row .primary { margin-left: auto; }
-  button {
-    display: inline-flex; align-items: center; gap: .4rem;
-    border: 1px solid var(--line); border-radius: 0; background: transparent;
-    color: inherit; font: inherit; padding: .42rem .72rem; cursor: pointer;
-  }
-  button:hover { border-color: var(--dim); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
-  .attachment-control {
-    display: inline-flex; align-items: center; gap: .4rem; min-width: 0;
-    color: var(--sidebar-dim); cursor: pointer; font-size: .8rem;
-  }
-  .attachment-control span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  details.live { margin: 0; }
-  details.live > summary {
-    color: var(--dim); cursor: pointer; font-size: .8rem; list-style-position: outside;
-  }
-  .live-body { padding-top: .45rem; }
-  .live-role + .live-role { margin-top: .65rem; }
-  .live-head {
-    display: flex; align-items: center; gap: .4rem; color: var(--dim);
-    font-size: .78rem; text-transform: uppercase; letter-spacing: .045em;
-  }
-  .stream-output {
-    margin: .3rem 0 0; padding: .55rem .65rem; max-height: 18rem; overflow: auto;
-    border-radius: 0; background: var(--bg); color: var(--ink);
-    font: .82rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
-    white-space: pre-wrap; overflow-wrap: anywhere;
-  }
-  .tool-list { margin: .35rem 0 0; padding: 0; list-style: none; color: var(--dim); }
-  .tool-list li {
-    display: flex; gap: .4rem; align-items: start; font-size: .78rem;
-    overflow-wrap: anywhere;
-  }
-  .tool-list li .bi { color: var(--accent); }
-  .history { color: var(--dim); font-size: .78rem; margin-top: .35rem; }
-  .empty { color: var(--sidebar-dim); text-align: center; margin-top: 2.5rem; }
-  .empty-icon { display: block; margin-bottom: .35rem; font-size: 1.4rem; }
-  .workbench {
-    display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-    min-height: 100vh;
-    transition: grid-template-columns .26s cubic-bezier(.2, 0, 0, 1);
-  }
-  .workbench.sidebar-collapsed {
-    grid-template-columns: var(--sidebar-rail-width) minmax(0, 1fr);
-  }
-  .sidebar {
-    height: 100vh; overflow-x: hidden; overflow-y: auto; padding: 0;
-    border-right: 1px solid var(--sidebar-line); background: var(--sidebar);
-    color: var(--sidebar-ink);
-    scrollbar-color: var(--sidebar-line) transparent;
-  }
-  .brand-row {
-    display: flex; align-items: center; height: var(--topbar-height); margin: 0; padding: 0 1rem;
-    border-bottom: 1px solid #393939; background: #161616; color: #fff;
-  }
-  .brand { display: flex; align-items: center; gap: .7rem; }
-  .brand-caption { color: #c6c6c6; font-size: .7rem; }
-  .sidebar-toggle {
-    justify-content: center; width: 2rem; height: 2rem; margin-left: auto; padding: 0;
-    border: 0; color: #c6c6c6;
-  }
-  .sidebar-toggle .bi { transition: transform .26s cubic-bezier(.2, 0, 0, 1); }
-  .sidebar-toggle:hover { background: #393939; color: #fff; }
-  .workbench.sidebar-collapsed .brand-row { justify-content: center; padding: 0; }
-  .workbench.sidebar-collapsed .brand,
-  .workbench.sidebar-collapsed #composer,
-  .workbench.sidebar-collapsed .setup-panel,
-  .workbench.sidebar-collapsed .queue-heading { display: none; }
-  .workbench.sidebar-collapsed .sidebar-toggle { margin-left: 0; }
-  .workbench.sidebar-collapsed .sidebar-toggle .bi { transform: rotate(180deg); }
-  .sidebar-shortcuts {
-    display: flex; flex-direction: column; max-height: 0; overflow: hidden;
-    opacity: 0; visibility: hidden; transform: translateY(-.35rem);
-    transition: max-height .26s cubic-bezier(.2, 0, 0, 1), opacity .16s ease,
-      transform .26s cubic-bezier(.2, 0, 0, 1), visibility 0s linear .26s;
-  }
-  .sidebar-shortcut {
-    flex: 0 0 var(--sidebar-rail-width); justify-content: center;
-    width: var(--sidebar-rail-width); height: var(--sidebar-rail-width); padding: 0;
-    border-width: 0 0 1px; background: var(--sidebar-panel); color: var(--sidebar-dim);
-  }
-  .sidebar-shortcut:hover { background: #e8e8e8; color: var(--accent); }
-  .workbench.sidebar-collapsed .sidebar-shortcuts {
-    max-height: calc(var(--sidebar-rail-width) * 2); opacity: 1; visibility: visible;
-    transform: translateY(0); transition-delay: 0s;
-  }
-  .queue-heading #summary {
-    margin-left: auto; color: var(--sidebar-dim); font-size: .72rem;
-    font-variant-numeric: tabular-nums; white-space: nowrap;
-  }
-  .sidebar form {
-    margin: 1rem; padding: .8rem; border-color: var(--sidebar-line); border-radius: 0;
-    background: var(--sidebar-panel);
-  }
-  .sidebar textarea { min-height: 4.5rem; color: var(--sidebar-ink); }
-  .sidebar textarea::placeholder { color: #8d8d8d; }
-  .setup-panel { margin: 0 1rem 1rem; border: 1px solid var(--sidebar-line); background: #fff; }
-  .setup-panel > summary {
-    display: flex; align-items: center; gap: .5rem; padding: .7rem .8rem;
-    cursor: pointer; font-weight: 600;
-  }
-  .setup-panel > summary .setup-mark { margin-left: auto; color: var(--sidebar-dim); }
-  .setup-panel form { margin: 0; border: 0; border-top: 1px solid var(--line); }
-  .setup-grid { display: grid; gap: .55rem; }
-  .setup-field { display: grid; gap: .2rem; min-width: 0; color: var(--sidebar-dim); font-size: .72rem; }
-  .setup-field select, .setup-field input, .setup-field textarea {
-    width: 100%; min-height: 2.1rem; padding: .35rem .45rem; border: 1px solid var(--line);
-    background: #fff; color: var(--sidebar-ink); font: inherit;
-  }
-  .setup-field textarea { min-height: 3.4rem; }
-  .setup-progress { padding: 0 .8rem .8rem; color: var(--sidebar-dim); font-size: .75rem; }
-  .setup-progress[data-status="failed"] { color: var(--danger); }
-  .setup-progress[data-status="complete"] { color: #198038; }
-  .setup-history { margin: .35rem 0 0; padding-left: 1.1rem; }
-  .queue-heading {
-    display: flex; align-items: center; gap: .5rem; margin: 1.5rem 1rem .5rem;
-    color: var(--sidebar-dim);
-  }
-  .queue-heading h2 {
-    margin: 0; font-size: .7rem; font-weight: 650; letter-spacing: .1em;
-    text-transform: uppercase;
-  }
-  .queue-list .task {
-    display: block; width: 100%; margin: 0; padding: .75rem 1rem;
-    border: solid var(--line); border-width: 1px 0 0; border-radius: 0; background: transparent;
-    color: var(--sidebar-ink); cursor: pointer; text-align: left;
-  }
-  .queue-list .task:hover { background: #e8e8e8; }
-  .queue-list .task.selected { border-left: 4px solid var(--accent); background: #e0e0e0; }
-  .queue-list .task header { display: flex; align-items: start; gap: .55rem; }
-  .queue-list .task .status-icon { margin-top: .08rem; color: var(--dim); }
-  .queue-list .task.selected .status-icon { color: var(--accent); }
-  .queue-list .task .id { color: var(--dim); font: .75rem ui-monospace, monospace; }
-  .queue-list .task .text {
-    display: -webkit-box; flex: 1; overflow: hidden; overflow-wrap: anywhere;
-    -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.4;
-  }
-  .queue-list .task .meta {
-    display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start;
-    gap: .7rem; margin: .35rem 0 0 2.65rem;
-    color: var(--sidebar-dim); font-size: .72rem;
-  }
-  .queue-list .task .meta span { display: inline-flex; align-items: center; gap: .3rem; }
-  .pending-badge {
-    padding: .05rem .35rem; background: var(--accent); color: #fff;
-    font-variant-numeric: tabular-nums;
-  }
-  .queue-list .task[data-status="running"] .status-icon,
-  .queue-list .task[data-status="review"] .status-icon,
-  .queue-list .task[data-status="delivering"] .status-icon,
-  .queue-list .task[data-status="cancelling"] .status-icon { color: var(--accent); }
-  .queue-list .task[data-status="approved"] .status-icon,
-  .queue-list .task[data-status="done"] .status-icon { color: #198038; }
-  .queue-list .task[data-status="failed"] .status-icon,
-  .queue-list .task[data-status="blocked"] .status-icon { color: var(--danger); }
-  .workbench.sidebar-collapsed .queue-list .task {
-    display: flex; align-items: center; justify-content: center;
-    width: var(--sidebar-rail-width); height: var(--sidebar-rail-width); padding: 0;
-  }
-  .workbench.sidebar-collapsed .queue-list .task.selected {
-    border-left: 0; box-shadow: inset 3px 0 var(--accent);
-  }
-  .workbench.sidebar-collapsed .queue-list .task header {
-    align-items: center; justify-content: center; width: 100%; height: 100%; gap: 0;
-  }
-  .workbench.sidebar-collapsed .queue-list .task .status-icon { margin: 0; }
-  .workbench.sidebar-collapsed .queue-list .task .id,
-  .workbench.sidebar-collapsed .queue-list .task .text,
-  .workbench.sidebar-collapsed .queue-list .task .meta,
-  .workbench.sidebar-collapsed .queue-list .empty { display: none; }
-  .detail { height: 100vh; overflow: auto; background: var(--bg); }
-  .detail-empty {
-    display: grid; min-height: calc(100% - var(--topbar-height)); place-items: center; padding: 2rem;
-    color: var(--dim); text-align: center;
-  }
-  .detail-top {
-    position: sticky; z-index: 2; top: 0; display: flex; align-items: center;
-    gap: .65rem; height: var(--topbar-height); padding: 0 1rem;
-    border-bottom: 1px solid #393939; background: #161616; color: #fff;
-  }
-  .detail-status { display: inline-flex; align-items: center; gap: .5rem; color: #c6c6c6; }
-  .detail-status .status-icon { color: var(--accent); }
-  .detail-actions { display: flex; gap: .45rem; margin-left: auto; }
-  .detail-actions button { color: var(--dim); background: var(--bg); }
-  .detail-actions button[data-verb="delete"] { color: var(--danger); }
-  .detail-body { width: 100%; padding: 2.5rem clamp(2rem, 5vw, 4.5rem) 6rem; }
-  .detail-title {
-    max-width: 62rem; margin: 0 0 2.4rem; font-size: clamp(1.8rem, 3.4vw, 3rem);
-    font-weight: 300; line-height: 1.08; letter-spacing: -.01em; white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .facts {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-    gap: 0; border: 1px solid var(--line); border-radius: 0; background: var(--card);
-  }
-  .fact { min-width: 0; padding: .8rem 1rem; }
-  .fact + .fact { border-left: 1px solid var(--line); }
-  .fact-label {
-    display: flex; align-items: center; gap: .35rem; color: var(--dim); font-size: .7rem;
-  }
-  .fact-value {
-    margin-top: .25rem; overflow-wrap: anywhere;
-    font: .78rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
-  }
-  .detail-section { margin-top: 2rem; }
-  .detail-section h3 {
-    display: flex; align-items: center; gap: .45rem; margin: 0 0 .65rem;
-    color: var(--dim); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase;
-  }
-  .detail-note {
-    padding: 1.1rem 1.2rem; border: 1px solid var(--line); border-radius: 0;
-    background: var(--card); white-space: pre-wrap; overflow-wrap: anywhere;
-  }
-  .detail-note.blocked { border-color: var(--danger); }
-  .detail-section.result .detail-note { font-size: .96rem; line-height: 1.65; }
-  .detail-section a { display: inline-flex; align-items: center; gap: .4rem; color: var(--accent); }
-  .thread-heading { align-items: center; }
-  .thread-count { margin-left: auto; font-variant-numeric: tabular-nums; }
-  .thread-list { display: grid; gap: .75rem; }
-  .thread-message {
-    max-width: min(52rem, 92%); padding: .85rem 1rem;
-    border: 1px solid var(--line); background: var(--card);
-  }
-  .thread-message.user { margin-left: auto; background: #edf5ff; border-color: #a6c8ff; }
-  .thread-message.system { max-width: 100%; background: #fff; color: var(--dim); }
-  .thread-message.activity { color: var(--ink); }
-  .thread-message.failed { border-color: var(--danger); }
-  .thread-message-head {
-    display: flex; align-items: center; flex-wrap: wrap; gap: .35rem;
-    margin-bottom: .35rem; color: var(--dim); font-size: .72rem;
-  }
-  .thread-message-head .message-status { margin-left: auto; }
-  .thread-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .thread-attachment { margin-top: .45rem; color: var(--dim); font-size: .75rem; }
-  .thread-more { margin-top: .75rem; }
-  .thread-error { margin-top: .65rem; color: var(--danger); }
-  .thread-composer {
-    position: sticky; z-index: 1; bottom: 0; margin: 1.25rem -.5rem 0;
-    padding: .75rem; border-color: var(--line); background: rgba(255, 255, 255, .97);
-    box-shadow: 0 -1px 0 var(--line);
-  }
-  .thread-composer textarea { min-height: 4rem; }
-  .thread-composer .comment { margin-left: auto; }
-  .thread-composer .primary { margin-left: 0; }
-  .thread-empty { padding: 1.25rem; border: 1px dashed var(--line); color: var(--dim); }
-  .thread-message.activity .live > summary {
-    display: flex; align-items: center; gap: .5rem;
-  }
-  .thread-message.activity .live > summary::marker { content: ""; }
-  .thread-message.activity .activity-chevron { margin-left: auto; }
-  .thread-message.activity .live[open] .activity-chevron { transform: rotate(90deg); }
-
-  @media (max-width: 760px) {
-    .workbench { display: block; }
-    .sidebar {
-      height: auto; max-height: 48vh; border-right: 0;
-      border-bottom: 1px solid var(--line);
-    }
-    .detail { height: auto; min-height: 52vh; }
-    .workbench.sidebar-collapsed .queue-list { display: flex; overflow-x: auto; }
-    .workbench.sidebar-collapsed .sidebar-shortcuts {
-      flex-direction: row; max-height: var(--sidebar-rail-width);
-    }
-    .workbench.sidebar-collapsed .queue-list .task { flex: 0 0 var(--sidebar-rail-width); }
-    .workbench.sidebar-collapsed .queue-list .task.selected {
-      box-shadow: inset 0 -3px var(--accent);
-    }
-    .detail-top { position: static; }
-    .detail-status span:last-child { display: none; }
-    .detail-body { padding: 1.5rem 1rem 4rem; }
-    .detail-title { font-size: clamp(1.55rem, 8vw, 2.2rem); }
-    .facts { grid-template-columns: 1fr 1fr; }
-    .fact:nth-child(odd) { border-left: 0; }
-    .fact:nth-child(n+3) { border-top: 1px solid var(--line); }
-    .thread-message { max-width: 96%; }
-    .thread-composer { margin-right: 0; margin-left: 0; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .workbench, .sidebar-toggle .bi, .sidebar-shortcuts { transition: none; }
-  }
-</style>
+<style>{{styles}}</style>
 <body>
-<div class="workbench">
-  <aside class="sidebar">
+<div class="workbench" data-mobile-view="queue">
+  <aside class="sidebar" id="queue-view" aria-label="Task queue">
     <div class="brand-row">
       <div class="brand">
         <div>
           <h1>MergeRail</h1>
-          <div class="brand-caption">Agent workbench</div>
+          <div class="brand-caption">Control room</div>
         </div>
       </div>
       <button class="sidebar-toggle" id="sidebar-toggle" type="button"
-              aria-label="Collapse sidebar" aria-expanded="true" aria-controls="sidebar-content">
+              aria-label="Collapse queue rail" aria-expanded="true" aria-controls="sidebar-content">
         <i class="bi bi-chevron-left" aria-hidden="true"></i>
       </button>
     </div>
     <div class="sidebar-content" id="sidebar-content">
-    <nav class="sidebar-shortcuts" aria-label="Sidebar shortcuts">
-      <button class="sidebar-shortcut" id="sidebar-new-task" type="button"
-              aria-label="Add task" title="Add task" aria-controls="composer">
-        <i class="bi bi-plus-lg" aria-hidden="true"></i>
-      </button>
-      <button class="sidebar-shortcut" id="sidebar-project-settings" type="button"
-              aria-label="Project settings" title="Project settings" aria-controls="setup-panel">
-        <i class="bi bi-sliders" aria-hidden="true"></i>
-      </button>
-    </nav>
-    <form id="composer">
-      <textarea id="text" placeholder="Describe a task…"></textarea>
-      <div class="row">
-        <input type="file" id="file">
-        <label class="attachment-control" for="file">
-          <i class="bi bi-paperclip" aria-hidden="true"></i>
-          <span id="file-label">Attach context</span>
-        </label>
-        <button type="submit" class="primary">
-          <i class="bi bi-arrow-up" aria-hidden="true"></i> Queue
+      <nav class="sidebar-shortcuts" aria-label="Queue shortcuts">
+        <button class="sidebar-shortcut" id="sidebar-new-task" type="button"
+                aria-label="New task" title="New task" aria-controls="composer">
+          <i class="bi bi-plus-lg" aria-hidden="true"></i>
         </button>
+        <button class="sidebar-shortcut" id="sidebar-project-settings" type="button"
+                aria-label="Project settings" title="Project settings" aria-controls="setup-panel">
+          <i class="bi bi-sliders" aria-hidden="true"></i>
+        </button>
+      </nav>
+      <div id="composer-slot">
+        <form id="composer" aria-labelledby="composer-title">
+          <label class="sr-only" id="composer-title" for="text">New task</label>
+          <textarea id="text" placeholder="Describe a task…" aria-describedby="composer-error"></textarea>
+          <div class="row">
+            <input type="file" id="file" hidden>
+            <button class="attachment-control" id="file-trigger" type="button" aria-controls="file">
+              <i class="bi bi-paperclip" aria-hidden="true"></i>
+              <span id="file-label">Attach context</span>
+            </button>
+            <button type="submit" class="primary">
+              <i class="bi bi-arrow-up" aria-hidden="true"></i><span>Queue</span>
+            </button>
+          </div>
+          <div class="composer-error" id="composer-error" aria-live="polite"></div>
+        </form>
       </div>
-    </form>
-    <details class="setup-panel" id="setup-panel">
-      <summary>
-        <i class="bi bi-sliders" aria-hidden="true"></i>
-        Project setup
-        <span class="setup-mark" id="setup-mark"></span>
-      </summary>
-      <form id="setup-form">
-        <div class="setup-grid">
-          <label class="setup-field">AI agent
-            <select id="setup-agent"></select>
-          </label>
-          <label class="setup-field">Environment
-            <select id="setup-environment">
-              <option value="local">Local</option><option value="staging">Staging</option>
-              <option value="production">Production</option>
-            </select>
-          </label>
-          <label class="setup-field">Current objective
-            <textarea id="setup-summary" placeholder="Project and current objective"></textarea>
-          </label>
-          <label class="setup-field">Actions outside repository
-            <select id="setup-external">
-              <option value="forbid">Never</option><option value="ask">Ask first</option>
-            </select>
-          </label>
-        </div>
-        <button type="submit" class="primary" id="setup-submit">
-          <i class="bi bi-check2" aria-hidden="true"></i> Save setup
-        </button>
-      </form>
-      <div class="setup-progress" id="setup-progress" aria-live="polite"></div>
-    </details>
-    <div class="queue-heading">
-      <h2>Tasks</h2>
-      <span id="summary"></span>
-    </div>
-    <div class="queue-list" id="tasks"></div>
+      <details class="setup-panel" id="setup-panel">
+        <summary>
+          <i class="bi bi-sliders" aria-hidden="true"></i>
+          Project setup
+          <span class="setup-mark" id="setup-mark"></span>
+        </summary>
+        <form id="setup-form">
+          <div class="setup-grid">
+            <label class="setup-field">AI agent
+              <select id="setup-agent"></select>
+            </label>
+            <label class="setup-field">Environment
+              <select id="setup-environment">
+                <option value="local">Local</option><option value="staging">Staging</option>
+                <option value="production">Production</option>
+              </select>
+            </label>
+            <label class="setup-field">Current objective
+              <textarea id="setup-summary" placeholder="Project and current objective"></textarea>
+            </label>
+            <label class="setup-field">Actions outside repository
+              <select id="setup-external">
+                <option value="forbid">Never</option><option value="ask">Ask first</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit" class="primary" id="setup-submit">
+            <i class="bi bi-check2" aria-hidden="true"></i><span>Save setup</span>
+          </button>
+        </form>
+        <div class="setup-progress" id="setup-progress" aria-live="polite"></div>
+      </details>
+      <div class="queue-heading">
+        <h2>Tasks</h2>
+        <span id="summary" aria-live="polite"></span>
+      </div>
+      <div class="queue-list" id="tasks"></div>
     </div>
   </aside>
-  <main class="detail" id="detail"></main>
+  <main class="detail" id="detail" aria-label="Task detail"></main>
+  <nav class="mobile-nav" id="mobile-nav" aria-label="Control room views">
+    <button type="button" id="mobile-queue" aria-controls="queue-view" aria-current="true">
+      <i class="bi bi-list-task" aria-hidden="true"></i><span>Queue</span>
+    </button>
+    <button type="button" id="mobile-task" aria-controls="detail" aria-disabled="true" aria-current="false">
+      <i class="bi bi-file-earmark-text" aria-hidden="true"></i><span>Task</span>
+    </button>
+    <button type="button" id="mobile-new-task" aria-controls="composer-sheet">
+      <i class="bi bi-plus-lg" aria-hidden="true"></i><span>New</span>
+    </button>
+  </nav>
+</div>
+<div class="composer-sheet" id="composer-sheet" role="dialog" aria-modal="true"
+     aria-labelledby="composer-sheet-title" aria-hidden="true" hidden>
+  <button class="composer-backdrop" id="composer-backdrop" type="button" aria-label="Close new task"></button>
+  <div class="composer-sheet-panel">
+    <div class="composer-sheet-header">
+      <h2 id="composer-sheet-title">New task</h2>
+      <button class="composer-sheet-close" id="composer-sheet-close" type="button" aria-label="Close new task">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="composer-sheet-content" id="composer-sheet-slot"></div>
+  </div>
 </div>
 <script>
 let rendered = "";  // rebuild the list only when it changed, so a button
@@ -403,12 +120,33 @@ let rendered = "";  // rebuild the list only when it changed, so a button
 const expandedStreams = new Set();
 let selectedTaskId = null;
 let taskSnapshot = [];
+const previousTaskStates = new Map();
+let taskStateHistoryReady = false;
 let setupSignature = "";
 const threadCache = new Map();
 const threadDrafts = new Map();
 const threadFiles = new Map();
 const workbench = document.querySelector(".workbench");
+const queueView = document.getElementById("queue-view");
+const detailView = document.getElementById("detail");
+const mobileQueue = document.getElementById("mobile-queue");
+const mobileTask = document.getElementById("mobile-task");
+const mobileNewTask = document.getElementById("mobile-new-task");
 const sidebarToggle = document.getElementById("sidebar-toggle");
+const composer = document.getElementById("composer");
+const composerSlot = document.getElementById("composer-slot");
+const composerSheet = document.getElementById("composer-sheet");
+const composerSheetSlot = document.getElementById("composer-sheet-slot");
+const composerSheetClose = document.getElementById("composer-sheet-close");
+const composerSheetPanel = composerSheet.querySelector(".composer-sheet-panel");
+const composerBackdrop = document.getElementById("composer-backdrop");
+let composerReturnFocus = null;
+let mobileView = "queue";
+let composerSheetState = "closed";
+let composerTransitionToken = 0;
+let composerCloseTimer = 0;
+let composerCloseReturnQueue = false;
+let composerSubmitting = false;
 const statusIcons = {
   new: "circle", running: "arrow-repeat", review: "search", approved: "check2-circle",
   delivering: "git", done: "check2", failed: "x-lg", blocked: "exclamation-triangle",
@@ -428,6 +166,13 @@ function renderPayload(raw) {
   if (signature === rendered) return;
   rendered = signature;
   const tasks = payload.tasks || [];
+  const selectedBefore = selectedTaskId;
+  const taskMotion = new Map(tasks.map((task) => {
+    const previous = previousTaskStates.get(task.id);
+    const motion = !taskStateHistoryReady ? ""
+      : !previous ? "new" : previous.status !== task.status ? "status" : "";
+    return [task.id, motion];
+  }));
   renderSetup(payload.setup || {});
   taskSnapshot = tasks;
   if (!tasks.some((task) => task.id === selectedTaskId))
@@ -436,10 +181,16 @@ function renderPayload(raw) {
   document.getElementById("summary").textContent =
     tasks.length ? `${open} open · ${tasks.length} total` : "";
   const root = document.getElementById("tasks");
-  root.replaceChildren(...(tasks.length ? tasks.map(card) : [empty()]));
+  root.replaceChildren(...(tasks.length ? tasks.map((task) => card(task, taskMotion.get(task.id))) : [empty()]));
   const selected = tasks.find((task) => task.id === selectedTaskId);
-  renderDetail(selected);
+  if (!selected && mobileView === "detail") mobileView = "queue";
+  setMobileView(mobileView);
+  const selectedChanged = selectedBefore !== null && selectedBefore !== selectedTaskId;
+  renderDetail(selected, selectedChanged);
   if (selected) syncThread(selected);
+  previousTaskStates.clear();
+  tasks.forEach((task) => previousTaskStates.set(task.id, {status: task.status}));
+  taskStateHistoryReady = true;
 }
 
 function renderSetup(setup) {
@@ -503,20 +254,19 @@ function empty() {
   return el;
 }
 
-function card(t) {
-  const el = document.createElement("article");
+function card(t, motion = "") {
+  const el = document.createElement("button");
+  el.type = "button";
   el.className = `task${t.id === selectedTaskId ? " selected" : ""}`;
+  if (motion) el.dataset.motion = motion;
   el.dataset.id = String(t.id);
   el.dataset.status = t.status;
   el.title = `#${t.id} · ${t.status} · ${t.text || "attachment only"}`;
-  el.tabIndex = 0;
-  el.setAttribute("role", "button");
   el.setAttribute("aria-label", el.title);
+  el.setAttribute("aria-current", String(t.id === selectedTaskId));
   el.onclick = () => selectTask(t.id);
-  el.onkeydown = (event) => {
-    if (event.key === "Enter" || event.key === " ") selectTask(t.id);
-  };
-  const head = document.createElement("header");
+  const head = document.createElement("span");
+  head.className = "task-head";
   head.append(
     icon(statusIcons[t.status] || "circle", "status-icon"),
     line("span", "id", `#${t.id}`),
@@ -546,18 +296,24 @@ function metaItem(name, text) {
 }
 
 function selectTask(id) {
+  const selectedBefore = selectedTaskId;
   selectedTaskId = id;
-  document.querySelectorAll(".queue-list .task").forEach((task) =>
-    task.classList.toggle("selected", Number(task.dataset.id) === id));
+  document.querySelectorAll(".queue-list .task").forEach((task) => {
+    const selected = Number(task.dataset.id) === id;
+    task.classList.toggle("selected", selected);
+    task.setAttribute("aria-current", String(selected));
+  });
   const selected = taskSnapshot.find((task) => task.id === id);
-  renderDetail(selected);
+  if (selected) setMobileView("detail");
+  renderDetail(selected, Boolean(selected && selectedBefore !== id));
   if (selected) syncThread(selected);
 }
 
-function renderDetail(t) {
+function renderDetail(t, animateSelection = false) {
   const root = document.getElementById("detail");
   const top = document.createElement("header");
   top.className = "detail-top";
+  if (t && animateSelection) top.dataset.motion = "selection";
   const status = document.createElement("span");
   status.className = "detail-status";
   status.append(
@@ -590,6 +346,7 @@ function renderDetail(t) {
     const link = document.createElement("a");
     link.href = t.url;
     link.target = "_blank";
+    link.rel = "noopener noreferrer";
     link.append(icon("box-arrow-up-right"), line("span", "", "Open pull request"));
     const wrap = document.createElement("div");
     wrap.className = "detail-section";
@@ -712,7 +469,7 @@ function thread(task) {
   if (task.live && Object.keys(task.live.roles || {}).length)
     list.append(agentActivity(task.id, task.live));
   if (!state.loaded && state.loading)
-    list.append(line("div", "thread-empty", "Loading discussion…"));
+    list.append(line("div", "thread-empty is-loading", "Loading discussion…"));
   wrap.append(list);
 
   if (state.loaded && state.messages.length < state.total) {
@@ -761,17 +518,21 @@ function formatTimestamp(value) {
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
 }
 
+function submitOnEnter(event, form) {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  form.requestSubmit();
+}
+
 function threadComposer(taskId, state) {
   const form = document.createElement("form");
-  form.className = "thread-composer";
+  form.className = `thread-composer${state.sending ? " is-sending" : ""}`;
   const input = document.createElement("textarea");
   input.placeholder = "Add context or a follow-up…";
   input.value = threadDrafts.get(taskId) || "";
   input.disabled = state.sending;
   input.oninput = () => threadDrafts.set(taskId, input.value);
-  input.addEventListener("keydown", (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") form.requestSubmit();
-  });
+  input.addEventListener("keydown", (event) => submitOnEnter(event, form));
   form.append(input);
 
   const row = document.createElement("div");
@@ -779,15 +540,18 @@ function threadComposer(taskId, state) {
   const picker = document.createElement("input");
   picker.type = "file";
   picker.id = `thread-file-${taskId}`;
+  picker.hidden = true;
   picker.onchange = () => {
     const file = picker.files[0];
     if (file) threadFiles.set(taskId, file); else threadFiles.delete(taskId);
-    label.querySelector("span").textContent = file?.name || "Attach context";
+    attachment.querySelector("span").textContent = file?.name || "Attach context";
   };
-  const label = document.createElement("label");
-  label.className = "attachment-control";
-  label.htmlFor = picker.id;
-  label.append(
+  const attachment = document.createElement("button");
+  attachment.type = "button";
+  attachment.className = "attachment-control";
+  attachment.setAttribute("aria-controls", picker.id);
+  attachment.onclick = () => picker.click();
+  attachment.append(
     icon("paperclip"),
     line("span", "", threadFiles.get(taskId)?.name || "Attach context"),
   );
@@ -802,8 +566,9 @@ function threadComposer(taskId, state) {
   send.dataset.mode = "instruction";
   send.className = "primary";
   send.disabled = state.sending;
+  send.setAttribute("aria-busy", String(state.sending));
   send.append(icon("arrow-up"), line("span", "", state.sending ? "Sending…" : "Send to agent"));
-  row.append(picker, label, comment, send);
+  row.append(picker, attachment, comment, send);
   form.append(row);
   form.onsubmit = (event) => {
     event.preventDefault();
@@ -872,7 +637,11 @@ function agentActivity(taskId, trace) {
     .map(([name, state]) => `${name}: ${state.status || "live"}`)
     .join(" · ");
   const summary = document.createElement("summary");
+  const ring = document.createElement("span");
+  ring.className = "live-status-ring is-live";
+  ring.setAttribute("aria-hidden", "true");
   summary.append(
+    ring,
     icon("terminal"),
     line(
       "span",
@@ -944,6 +713,7 @@ function act(id, verb, label) {
   const el = document.createElement("button");
   el.type = "button";
   el.dataset.verb = verb;
+  el.setAttribute("aria-label", label);
   const icons = {
     "retry-delivery": "git", "retry-task": "arrow-clockwise",
     cancel: "stop-circle", close: "x-lg", delete: "trash3",
@@ -970,31 +740,44 @@ function icon(name, cls = "") {
   return el;
 }
 
-document.getElementById("composer").onsubmit = async (event) => {
+composer.onsubmit = async (event) => {
   event.preventDefault();
+  if (composerSubmitting) return;
   const text = document.getElementById("text");
   const picker = document.getElementById("file");
+  const error = document.getElementById("composer-error");
+  const submit = composer.querySelector('button[type="submit"]');
   const payload = {text: text.value};
-  const file = picker.files[0];
-  if (file) {
-    const data = await new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(file);
+  error.textContent = "";
+  composerSubmitting = true;
+  submit.disabled = true;
+  composer.classList.add("is-sending");
+  try {
+    const file = picker.files[0];
+    if (file) {
+      const data = await readFile(file);
+      payload.file = {name: file.name, data};
+    }
+    const sent = await fetch("/api/tasks", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
     });
-    payload.file = {name: file.name, data: String(data).split(",", 2)[1]};
-  }
-  const sent = await fetch("/api/tasks", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(payload),
-  });
-  if (sent.ok) {
+    const answer = await sent.json();
+    if (!sent.ok) throw new Error(answer.error || "Could not queue task");
     text.value = "";
     picker.value = "";
     document.getElementById("file-label").textContent = "Attach context";
+    closeComposerSheet({returnQueue: true});
+    await refresh();
+  } catch (submissionError) {
+    error.textContent = submissionError instanceof Error
+      ? submissionError.message : "Could not queue task";
+  } finally {
+    composerSubmitting = false;
+    submit.disabled = false;
+    composer.classList.remove("is-sending");
   }
-  refresh();
 };
 
 document.getElementById("setup-form").onsubmit = async (event) => {
@@ -1015,17 +798,110 @@ document.getElementById("file").onchange = (event) => {
   document.getElementById("file-label").textContent =
     event.target.files[0]?.name || "Attach context";
 };
+document.getElementById("file-trigger").onclick = () =>
+  document.getElementById("file").click();
 
 document.getElementById("text").addEventListener("keydown", (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key === "Enter")
-    document.getElementById("composer").requestSubmit();
+  submitOnEnter(event, composer);
 });
 
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 760px)").matches;
+}
+
+function setMobileView(view) {
+  const next = view === "detail" && selectedTaskId !== null ? "detail" : "queue";
+  mobileView = next;
+  workbench.dataset.mobileView = next;
+  const mobile = isMobileViewport();
+  queueView.hidden = mobile && next !== "queue";
+  detailView.hidden = mobile && next !== "detail";
+  queueView.inert = mobile && next !== "queue";
+  detailView.inert = mobile && next !== "detail";
+  mobileQueue.setAttribute("aria-current", String(next === "queue"));
+  mobileTask.setAttribute("aria-current", String(next === "detail"));
+  mobileTask.setAttribute("aria-disabled", String(selectedTaskId === null));
+}
+
+function composerFocusable() {
+  return [...composerSheet.querySelectorAll(
+    "button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled])",
+  )].filter((element) => !element.hidden && element.tabIndex >= 0);
+}
+
+function composerMotionDisabled() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function finalizeComposerClose(token = composerTransitionToken) {
+  if (token !== composerTransitionToken || composerSheetState === "closed") return;
+  window.clearTimeout(composerCloseTimer);
+  composerCloseTimer = 0;
+  composerSheetState = "closed";
+  composerSheet.classList.remove("is-open", "is-closing");
+  composerSlot.append(composer);
+  composerSheet.hidden = true;
+  composerSheet.setAttribute("aria-hidden", "true");
+  workbench.inert = false;
+  if (composerCloseReturnQueue) setMobileView("queue");
+  composerCloseReturnQueue = false;
+  const target = composerReturnFocus;
+  composerReturnFocus = null;
+  if (target && typeof target.focus === "function") target.focus();
+}
+
+function openComposerSheet() {
+  if (!isMobileViewport()) {
+    setSidebarCollapsed(false);
+    document.getElementById("text").focus();
+    return;
+  }
+  if (composerSheetState === "closed") composerReturnFocus = document.activeElement;
+  const token = ++composerTransitionToken;
+  window.clearTimeout(composerCloseTimer);
+  composerCloseTimer = 0;
+  composerSheetSlot.append(composer);
+  composerSheet.hidden = false;
+  composerSheet.setAttribute("aria-hidden", "false");
+  composerSheetState = "open";
+  composerSheet.classList.remove("is-open", "is-closing");
+  workbench.inert = true;
+  document.getElementById("composer-error").textContent = "";
+  requestAnimationFrame(() => {
+    if (token === composerTransitionToken && composerSheetState === "open") {
+      composerSheet.classList.add("is-open");
+      document.getElementById("text").focus();
+    }
+  });
+}
+
+function closeComposerSheet({returnQueue = false} = {}) {
+  if (composerSheetState === "closed" || composerSheet.hidden) {
+    if (returnQueue) setMobileView("queue");
+    return;
+  }
+  const token = ++composerTransitionToken;
+  window.clearTimeout(composerCloseTimer);
+  composerCloseReturnQueue = returnQueue;
+  const immediate = !isMobileViewport() || composerMotionDisabled();
+  if (immediate) {
+    finalizeComposerClose(token);
+    return;
+  }
+  composerSheetState = "closing";
+  composerSheet.setAttribute("aria-hidden", "false");
+  composerSheet.classList.remove("is-open");
+  composerSheet.classList.add("is-closing");
+  workbench.inert = true;
+  composerCloseTimer = window.setTimeout(() => finalizeComposerClose(token), 340);
+}
+
 function setSidebarCollapsed(collapsed) {
-  workbench.classList.toggle("sidebar-collapsed", collapsed);
-  sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
-  sidebarToggle.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
-  sidebarToggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  const value = isMobileViewport() ? false : collapsed;
+  workbench.classList.toggle("sidebar-collapsed", value);
+  sidebarToggle.setAttribute("aria-expanded", String(!value));
+  sidebarToggle.setAttribute("aria-label", value ? "Expand queue rail" : "Collapse queue rail");
+  sidebarToggle.title = value ? "Expand queue rail" : "Collapse queue rail";
 }
 
 sidebarToggle.onclick = () =>
@@ -1033,14 +909,54 @@ sidebarToggle.onclick = () =>
 
 document.getElementById("sidebar-new-task").onclick = () => {
   setSidebarCollapsed(false);
-  document.getElementById("text").focus();
+  openComposerSheet();
 };
 
 document.getElementById("sidebar-project-settings").onclick = () => {
   setSidebarCollapsed(false);
+  setMobileView("queue");
   document.getElementById("setup-panel").open = true;
   document.getElementById("setup-agent").focus();
 };
+
+mobileQueue.onclick = () => setMobileView("queue");
+mobileTask.onclick = () => {
+  if (selectedTaskId !== null) setMobileView("detail");
+};
+mobileNewTask.onclick = openComposerSheet;
+composerSheetClose.onclick = () => closeComposerSheet();
+composerBackdrop.onclick = () => closeComposerSheet();
+composerSheetPanel.addEventListener("transitionend", (event) => {
+  if (event.target === composerSheetPanel && event.propertyName === "transform" && composerSheetState === "closing")
+    finalizeComposerClose(composerTransitionToken);
+});
+composerSheet.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeComposerSheet();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = composerFocusable();
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});
+window.addEventListener("resize", () => {
+  if (!isMobileViewport() && !composerSheet.hidden) {
+    closeComposerSheet();
+    document.getElementById("text").focus();
+  }
+  setMobileView(mobileView);
+});
+setMobileView("queue");
 
 refresh();
 const events = new EventSource("/api/events");
