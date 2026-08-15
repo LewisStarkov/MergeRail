@@ -107,7 +107,7 @@ stderr; any non-JSON stdout line is a protocol error. Frames use UTF-8 and are l
 Immediately after starting the process, `mergerail` sends:
 
 ```json
-{"type":"hello","protocol":1,"mergerail_version":"0.1.0"}
+{"type":"hello","protocol":1,"mergerail_version":"0.1.1"}
 ```
 
 The driver must answer before the handshake timeout:

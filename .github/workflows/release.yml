@@ -1,6 +1,6 @@
 # Publishes to PyPI on a version tag, via trusted publishing — configure the
 # publisher once at https://pypi.org/manage/account/publishing/ (no token in
-# secrets), then: git tag v0.1.0 && git push --tags
+# secrets), then: git tag vX.Y.Z && git push origin vX.Y.Z
 name: release
 
 on:

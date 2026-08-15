@@ -394,7 +394,7 @@ def _mergerail_version() -> str:
     try:
         return metadata.version("mergerail")
     except metadata.PackageNotFoundError:
-        return "0.1.0"
+        return "0.1.1"
 
 
 def _integer(value: object) -> int | None:
