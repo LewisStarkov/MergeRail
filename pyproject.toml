@@ -1,6 +1,6 @@
 [project]
 name = "mergerail"
-version = "0.1.2"
+version = "0.1.3"
 description = "Queue coding tasks across agent CLIs, review the result, and deliver it safely."
 readme = "README.md"
 requires-python = ">=3.11"
