@@ -9,11 +9,12 @@ import pytest
 from mergerail import update
 from mergerail.audit import AuditLog
 from mergerail.backends.registry import BackendRegistry
-from mergerail.cli import _share, build_parser, main, resolve
+from mergerail.cli import _runtime_updates_enabled, _share, build_parser, main, resolve
 from mergerail.config import Config
-from mergerail.fronts import make_front
+from mergerail.fronts import WebFront, make_front
 from mergerail.share import NgrokTunnel
 from mergerail.tasks import Status, TaskStore
+from mergerail.update import ReleaseCandidate
 from tests.fake_front import EchoFront
 
 
@@ -48,6 +49,214 @@ def test_update_command_does_not_require_a_project_repository(
 
     assert main(["update", "--check"]) == 0
     assert called == [True]
+
+
+def test_startup_update_activation_failure_exits_nonzero_without_running_old_code(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["mergerail", "run", "--web", "--path", str(repo)])
+    monkeypatch.setattr(update, "auto_update", lambda: "v0.2.0")
+
+    def fail_activation(arguments: list[str]) -> None:
+        del arguments
+        raise update.UpdateError("exec failed")
+
+    monkeypatch.setattr(update, "relaunch", fail_activation)
+    monkeypatch.setattr(
+        "mergerail.cli.resolve",
+        lambda args: pytest.fail("old interpreter must not continue after install"),
+    )
+
+    assert main() == 1
+    assert "could not restart after updating" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["run", "--web", "--once"],
+        ["run", "--web", "--front", "web"],
+        ["run", "--web", "--share", "ngrok"],
+        ["run", "--web", "--no-update"],
+        ["run", "--web", "--telegram"],
+    ],
+)
+def test_runtime_updates_opt_out_of_nonlocal_or_bounded_runs(
+    arguments: list[str], tmp_path: Path
+) -> None:
+    args = build_parser().parse_args(arguments)
+    front = WebFront(TaskStore(tmp_path / "tasks.json"))
+    assert not _runtime_updates_enabled(args, None, front)
+
+
+def test_runtime_updates_require_the_real_web_cli(tmp_path: Path) -> None:
+    args = build_parser().parse_args(["run", "--web"])
+    front = WebFront(TaskStore(tmp_path / "tasks.json"))
+    assert _runtime_updates_enabled(args, None, front)
+    assert not _runtime_updates_enabled(args, ["run", "--web"], front)
+
+
+def test_runtime_updates_reject_resolved_nonlocal_or_unsafe_web_fronts(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    args = build_parser().parse_args(["run", "--web"])
+    config = Config.load(repo)
+    store = TaskStore(config.queue_path)
+
+    config.fronts["web"] = {"host": "0.0.0.0"}
+    configured_nonlocal = make_front("web", config, store)
+    assert not _runtime_updates_enabled(args, None, configured_nonlocal)
+
+    config.fronts["web"] = {"host": "127.0.0.1"}
+    monkeypatch.setenv("MERGERAIL_WEB_HOST", "::")
+    environment_nonlocal = make_front("web", config, store)
+    assert not _runtime_updates_enabled(args, None, environment_nonlocal)
+
+    monkeypatch.setenv("MERGERAIL_WEB_HOST", "127.0.0.1")
+    monkeypatch.setenv("MERGERAIL_WEB_UNSAFE_EXPOSE", "1")
+    unsafe = make_front("web", config, store)
+    assert not _runtime_updates_enabled(args, None, unsafe)
+
+
+def test_runtime_install_happens_after_runner_returns(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    found = ReleaseCandidate("v0.2.0", "1" * 40, update.REPOSITORY)
+    runs = iter([found, None])
+
+    class FakeRunner:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            self.stopping = False
+            self.front = WebFront(TaskStore(repo / ".mergerail" / "fake-tasks.json"))
+            self.update_probe: object = None
+            events.append("runner.created")
+
+        def run(self, *, once: bool = False) -> ReleaseCandidate | None:
+            assert once is False
+            assert self.update_probe is update.runtime_candidate
+            events.append("runner.returned")
+            return next(runs)
+
+    monkeypatch.setattr(sys, "argv", ["mergerail", "run", "--web", "--path", str(repo)])
+    monkeypatch.setattr("mergerail.cli.Runner", FakeRunner)
+    monkeypatch.setattr("mergerail.cli.preflight", lambda config: True)
+    monkeypatch.setattr(update, "auto_update", lambda: None)
+
+    def fail_install(found: ReleaseCandidate) -> bool:
+        events.append(f"install:{found.tag}")
+        return False
+
+    monkeypatch.setattr(update, "install_candidate", fail_install)
+
+    assert main() == 0
+    assert events == [
+        "runner.created",
+        "runner.returned",
+        "install:v0.2.0",
+        "runner.created",
+        "runner.returned",
+    ]
+
+
+def test_runtime_update_does_not_install_after_stop_is_requested(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    found = ReleaseCandidate("v0.2.0", "1" * 40, update.REPOSITORY)
+
+    class FakeRunner:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            self.stopping = False
+            self.front = WebFront(TaskStore(repo / ".mergerail" / "fake-tasks.json"))
+
+        def run(self, *, once: bool = False) -> ReleaseCandidate:
+            del once
+            self.stopping = True
+            return found
+
+    monkeypatch.setattr(sys, "argv", ["mergerail", "run", "--web", "--path", str(repo)])
+    monkeypatch.setattr("mergerail.cli.Runner", FakeRunner)
+    monkeypatch.setattr("mergerail.cli.preflight", lambda config: True)
+    monkeypatch.setattr(update, "auto_update", lambda: None)
+    monkeypatch.setattr(
+        update,
+        "install_candidate",
+        lambda found: pytest.fail("stop must win before installation"),
+    )
+
+    assert main() == 0
+
+
+def test_runtime_update_checks_stop_again_before_activation(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    found = ReleaseCandidate("v0.2.0", "1" * 40, update.REPOSITORY)
+
+    class FakeRunner:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            self.stopping = False
+            self.front = WebFront(TaskStore(repo / ".mergerail" / "fake-tasks.json"))
+            instances.append(self)
+
+        def run(self, *, once: bool = False) -> ReleaseCandidate:
+            del once
+            return found
+
+    instances: list[FakeRunner] = []
+
+    def install(found: ReleaseCandidate) -> bool:
+        del found
+        instances[-1].stopping = True
+        return True
+
+    monkeypatch.setattr(sys, "argv", ["mergerail", "run", "--web", "--path", str(repo)])
+    monkeypatch.setattr("mergerail.cli.Runner", FakeRunner)
+    monkeypatch.setattr("mergerail.cli.preflight", lambda config: True)
+    monkeypatch.setattr(update, "auto_update", lambda: None)
+    monkeypatch.setattr(update, "install_candidate", install)
+    monkeypatch.setattr(
+        update, "relaunch", lambda arguments: pytest.fail("stop must win before activation")
+    )
+
+    assert main() == 0
+
+
+def test_activation_failure_exits_nonzero_without_resuming_old_code(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    found = ReleaseCandidate("v0.2.0", "1" * 40, update.REPOSITORY)
+    created = 0
+
+    class FakeRunner:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            nonlocal created
+            del args, kwargs
+            created += 1
+            self.stopping = False
+            self.front = WebFront(TaskStore(repo / ".mergerail" / "fake-tasks.json"))
+
+        def run(self, *, once: bool = False) -> ReleaseCandidate:
+            del once
+            return found
+
+    monkeypatch.setattr(sys, "argv", ["mergerail", "run", "--web", "--path", str(repo)])
+    monkeypatch.setattr("mergerail.cli.Runner", FakeRunner)
+    monkeypatch.setattr("mergerail.cli.preflight", lambda config: True)
+    monkeypatch.setattr(update, "auto_update", lambda: None)
+    monkeypatch.setattr(update, "install_candidate", lambda found: True)
+
+    def fail_activation(arguments: list[str]) -> None:
+        del arguments
+        raise update.UpdateError("exec failed")
+
+    monkeypatch.setattr(update, "relaunch", fail_activation)
+
+    assert main() == 1
+    assert created == 1
+    assert "restart manually" in capsys.readouterr().err
 
 
 def test_events_reads_and_filters_the_audit_journal(

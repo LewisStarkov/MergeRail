@@ -27,11 +27,16 @@ from mergerail.backends import (
 from mergerail.config import Config
 from mergerail.detect import Check
 from mergerail.fronts.base import Front, StreamEvent
+from mergerail.lease import RunnerLease
 from mergerail.runner import Runner
 from mergerail.tasks import Status, Task, TaskStore
+from mergerail.update import ReleaseCandidate
 
 APPROVE = "VERDICT: APPROVE"
 REJECT = "VERDICT: REJECT"
+RUNTIME_CANDIDATE = ReleaseCandidate(
+    "v0.2.0", "1" * 40, "https://example.test/mergerail.git"
+)
 
 Turn = Callable[[str], AgentReply]
 
@@ -576,6 +581,74 @@ def test_run_until_stops_after_the_named_task(
     waiting = runner.store.get(first.id + 1)
     assert done is not None and done.status == Status.DONE
     assert waiting is not None and waiting.status == Status.NEW
+
+
+def test_runtime_update_waits_for_a_task_then_claims_no_more_work(
+    rig: tuple[Runner, FakeAgent, FakeAgent],
+) -> None:
+    runner, fixer, _reviewer = rig
+    fixer.turns = [says("ANSWER: finished safely")]
+    first = runner.store.add("finish this first")
+    second = runner.store.add("leave this queued")
+    probes = iter([None, RUNTIME_CANDIDATE])
+    runner.update_probe = lambda: next(probes)
+
+    assert runner.run() == RUNTIME_CANDIDATE
+
+    finished = runner.store.get(first.id)
+    waiting = runner.store.get(second.id)
+    assert finished is not None and finished.status == Status.DONE
+    assert waiting is not None and waiting.status == Status.NEW
+    assert waiting.claimed_by == ""
+
+
+def test_runtime_update_follows_pending_delivery_handling(
+    rig: tuple[Runner, FakeAgent, FakeAgent], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner, _fixer, _reviewer = rig
+    pending = Task(id=7, text="deliver me")
+    deliveries = iter([[pending], []])
+    events: list[str] = []
+    monkeypatch.setattr(runner.store, "delivery_tasks", lambda: next(deliveries))
+    monkeypatch.setattr(runner, "land", lambda *args: events.append("delivery"))
+
+    def probe() -> ReleaseCandidate:
+        events.append("probe")
+        return RUNTIME_CANDIDATE
+
+    runner.update_probe = probe
+    monkeypatch.setattr(
+        runner.front,
+        "next_task",
+        lambda: pytest.fail("a task was claimed after finding an update"),
+    )
+
+    assert runner._loop(once=False, until=None) == RUNTIME_CANDIDATE
+    assert events == ["delivery", "probe"]
+
+
+def test_runtime_candidate_returns_only_after_cleanup_and_lease_release(
+    rig: tuple[Runner, FakeAgent, FakeAgent], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner, _fixer, _reviewer = rig
+    events: list[str] = []
+
+    def probe() -> ReleaseCandidate:
+        events.append("probe")
+        return RUNTIME_CANDIDATE
+
+    runner.update_probe = probe
+    monkeypatch.setattr(runner.front, "start", lambda: events.append("front.start"))
+    monkeypatch.setattr(runner.front, "stop", lambda: events.append("front.stop"))
+    monkeypatch.setattr(runner.supervisor, "start", lambda: events.append("process.start"))
+    monkeypatch.setattr(runner.supervisor, "stop", lambda: events.append("process.stop"))
+
+    assert runner.run() == RUNTIME_CANDIDATE
+
+    assert events == ["front.start", "process.start", "probe", "front.stop", "process.stop"]
+    replacement = RunnerLease(runner.lease.path)
+    replacement.acquire()
+    replacement.release()
 
 
 def test_run_recovers_review_work_on_a_new_attempt(

@@ -6,6 +6,26 @@ on:
   pull_request:
 
 jobs:
+  webui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - run: npm ci
+        working-directory: webui
+      - run: npm run typecheck
+        working-directory: webui
+      - run: npm test
+        working-directory: webui
+      - run: npm run build
+        working-directory: webui
+      - name: Verify packaged web build is current
+        run: test -z "$(git status --porcelain --untracked-files=all -- src/mergerail/fronts/web_assets/dist)"
+
   test:
     strategy:
       fail-fast: false

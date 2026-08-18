@@ -2,64 +2,63 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Control room locked · MergeRail</title>
-<link rel="stylesheet"
- href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
-<style>{{styles}}</style>
+<title>Sign in · MergeRail</title>
+<link rel="stylesheet" href="/login.css">
+<script src="/login.js" defer></script>
 <body>
-<main class="login-shell workbench">
-  <aside class="sidebar login-queue" inert aria-label="Locked task queue">
-    <div class="brand-row">
-      <div class="brand">
-        <div>
-          <h1>MergeRail</h1>
-          <div class="brand-caption">Control room locked</div>
-        </div>
-      </div>
-    </div>
-    <div class="locked-queue" aria-hidden="true">
-      <div class="locked-queue-heading">
-        <h2>Tasks</h2>
-        <span class="locked-queue-label">LOCKED</span>
-      </div>
-      <div class="locked-queue-row">
-        <strong>Queue unavailable</strong>
-        <span>Authenticate to inspect task traffic.</span>
-      </div>
-    </div>
-  </aside>
-  <section class="detail login-detail" aria-labelledby="login-title">
-    <header class="detail-top">
-      <span class="detail-status">
-        <i class="bi bi-lock-fill status-icon" aria-hidden="true"></i>
-        <span>Control room locked</span>
+<main class="login-shell">
+  <header class="login-topbar">
+    <a class="login-brand" href="/" aria-label="MergeRail home">
+      <span class="login-mark" aria-hidden="true">MR</span>
+      <span>
+        <strong>MergeRail</strong>
+        <small>Delivery operations</small>
       </span>
-    </header>
-    <div class="detail-body login-workspace">
+    </a>
+    <span class="login-local"><span aria-hidden="true"></span>Local control plane</span>
+    <button class="login-theme" id="theme-toggle" type="button"
+            aria-label="Use dark theme" title="Use dark theme">
+      <span aria-hidden="true">◐</span>
+    </button>
+  </header>
+
+  <div class="login-layout">
+    <section class="login-context" aria-labelledby="context-title">
+      <div class="login-rail" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <div class="login-context-copy">
+        <span class="login-kicker">Operator workspace</span>
+        <h1 id="context-title">Delivery work,<br>kept on the rails.</h1>
+        <p>Queue agent work, inspect the activity ledger, and move reviewed changes to delivery from one local control plane.</p>
+      </div>
+      <dl class="login-facts">
+        <div><dt>Transport</dt><dd>Local HTTP + SSE</dd></div>
+        <div><dt>Credentials</dt><dd>Checked on this host</dd></div>
+        <div><dt>External assets</dt><dd>None</dd></div>
+      </dl>
+    </section>
+
+    <section class="login-panel" aria-labelledby="login-title">
       <div class="login-card">
-        <span class="eyebrow">MergeRail / web access</span>
-        <h2 id="login-title">Control room locked</h2>
-        <p>Enter your MergeRail web credentials.</p>
+        <span class="login-kicker">Workspace access</span>
+        <h2 id="login-title">Sign in to continue</h2>
+        <p>Use the credentials configured for this MergeRail instance.</p>
         {{error}}
         <form method="post" action="/login">
           <label for="username">Username
             <input id="username" name="username" autocomplete="username" required autofocus>
           </label>
           <label for="password">Password
-            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <input id="password" name="password" type="password"
+                   autocomplete="current-password" required>
           </label>
-          <button type="submit" class="primary">
-            <span>Unlock</span>
-            <i class="bi bi-arrow-right" aria-hidden="true"></i>
-          </button>
+          <button type="submit">Sign in <span aria-hidden="true">→</span></button>
         </form>
-        <p class="login-status">
-          <i class="bi bi-shield-lock" aria-hidden="true"></i>
-          <span>Credentials are checked locally.</span>
-        </p>
+        <p class="login-note">Authentication stays local to the running MergeRail process.</p>
       </div>
-    </div>
-  </section>
+    </section>
+  </div>
 </main>
 </body>
 </html>
