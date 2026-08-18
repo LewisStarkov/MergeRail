@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -368,7 +367,8 @@ def test_installed_candidate_activates_even_if_state_persistence_fails(
 def test_relaunch_execs_the_installed_executable_without_a_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    executable = tmp_path / ("mergerail.exe" if sys.platform == "win32" else "mergerail")
+    monkeypatch.setattr("mergerail.update.sys.platform", "linux")
+    executable = tmp_path / "mergerail"
     executable.write_text("", encoding="utf-8")
     monkeypatch.setattr("mergerail.update.shutil.which", lambda name: "/usr/bin/uv")
     monkeypatch.setattr(update, "_run", lambda *args, **kwargs: completed(f"{tmp_path}\n"))
