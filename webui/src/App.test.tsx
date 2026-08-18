@@ -110,7 +110,7 @@ describe("App integration contracts", () => {
 
     await act(async () => { window.dispatchEvent(new Event("online")); });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(reload).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
 
     await act(async () => { window.dispatchEvent(new Event("online")); });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
@@ -232,7 +232,8 @@ describe("App integration contracts", () => {
     fireEvent.click(agent);
     const listbox = screen.getByRole("listbox", {name: "AI agent"});
     expect(listbox).toBeTruthy();
-    expect(screen.getByRole("option", {name: "offline — not installed"}).getAttribute("aria-disabled")).toBe("true");
+    const unavailableAgent = await screen.findByRole("option", {name: "offline — not installed"});
+    expect(unavailableAgent.getAttribute("aria-disabled")).toBe("true");
     fireEvent.keyDown(listbox, {key: "Escape"});
     expect(screen.getByRole("dialog", {name: "Project setup"})).toBeTruthy();
     expect(document.activeElement).toBe(agent);
