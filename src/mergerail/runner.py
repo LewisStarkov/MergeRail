@@ -23,11 +23,11 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from . import checks, delivery, log, prompts
 from .audit import AuditLog
@@ -52,6 +52,17 @@ from .supervisor import Supervisor
 from .tasks import Status, Task, TaskMessage, TaskStore
 
 
+class UpdateCandidate(Protocol):
+    @property
+    def tag(self) -> str: ...
+
+    @property
+    def revision(self) -> str: ...
+
+    @property
+    def repository(self) -> str: ...
+
+
 class _RunnerEventSink(EventSink):
     def __init__(self, runner: Runner, backend: str, role: str) -> None:
         self.runner = runner
@@ -74,6 +85,7 @@ class Runner:
         backends: BackendRegistry | None = None,
         share: Share | None = None,
         allow_setup: bool = False,
+        update_probe: Callable[[], UpdateCandidate | None] | None = None,
     ) -> None:
         if config is None:
             start = Path.cwd()
@@ -87,6 +99,7 @@ class Runner:
             self.config.process if supervise else [], self.config.root, self.config.process_log
         )
         self.share = share
+        self.update_probe = update_probe
         self.worktree = Worktree(self.config.root, self.config.worktree)
         self.backends = backends or self.config.backend_registry()
         self.fixer_backend = ""
@@ -327,7 +340,9 @@ class Runner:
 
     # --- lifecycle -------------------------------------------------------
 
-    def run(self, *, once: bool = False, until: int | None = None) -> None:
+    def run(
+        self, *, once: bool = False, until: int | None = None
+    ) -> UpdateCandidate | None:
         """Work the queue. ``once`` stops after one task; ``until`` after that task."""
         self.config.state_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -361,7 +376,7 @@ class Runner:
                     self.share.start(self.front)
                 self.supervisor.start()
                 self._recover_deliveries()
-                self._loop(once=once, until=until)
+                return self._loop(once=once, until=until)
             finally:
                 if self.share is not None:
                     self.share.stop()
@@ -445,7 +460,7 @@ class Runner:
                 previous_branches=task.previous_branches,
             )
 
-    def _loop(self, *, once: bool, until: int | None) -> None:
+    def _loop(self, *, once: bool, until: int | None) -> UpdateCandidate | None:
         while not self.stopping:
             self.supervisor.supervise()
             pending_delivery = self.store.delivery_tasks()
@@ -459,11 +474,21 @@ class Runner:
                     task.cost_usd,
                 )
                 continue
+            if self.update_probe is not None:
+                try:
+                    candidate = self.update_probe()
+                except Exception:
+                    log.exception("runner.update_probe_failed")
+                else:
+                    if candidate is not None:
+                        log.info("runner.update_ready", version=candidate.tag)
+                        self.audit.emit("runner.update_ready", version=candidate.tag)
+                        return candidate
             queued = self.front.next_task()
             if queued is None:
                 if once or (until is not None and self._settled(until)):
                     log.info("runner.queue_empty")
-                    return
+                    return None
                 time.sleep(self.config.poll_seconds)
                 continue
             task = queued
@@ -477,7 +502,8 @@ class Runner:
                     self._active_task = None
                 self._close_agent_sessions()
             if once or task.id == until:
-                return
+                return None
+        return None
 
     def _settled(self, task_id: int) -> bool:
         """Whether the task we were asked to wait for is already off the queue."""

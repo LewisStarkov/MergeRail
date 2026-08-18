@@ -6,3 +6,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 dist/
+node_modules/
+webui/coverage/
+!src/mergerail/fronts/web_assets/dist/
+!src/mergerail/fronts/web_assets/dist/**

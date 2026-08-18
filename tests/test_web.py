@@ -5,16 +5,20 @@ from __future__ import annotations
 import base64
 import http.cookiejar
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
+from html import escape
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from mergerail import __version__
+from mergerail.fronts import web as web_module
 from mergerail.fronts.base import StreamEvent
 from mergerail.fronts.web import (
     MAX_LIVE_TASKS,
@@ -77,105 +81,134 @@ def call_response(
 
 
 def test_the_page_is_served(front: WebFront) -> None:
+    package_root = Path(__file__).parents[1] / "src/mergerail/fronts/web_assets"
+    index = package_root / "dist" / "index.html"
+    assert index.is_file(), "packaged Vite index is missing"
+
     with urllib.request.urlopen(f"http://127.0.0.1:{front.port}/", timeout=5) as response:
-        page = response.read().decode("utf-8")
-    assert "MergeRail" in page
-    assert "textContent" in page  # task text must never become markup
-    assert 'new EventSource("/api/events")' in page
-    assert "aria-live" in page
-    assert 'document.createElement("details")' in page
-    assert "expandedStreams.has(taskId)" in page
-    assert 'class="workbench"' in page
-    assert 'id="sidebar-toggle"' in page
-    assert 'id="sidebar-content"' in page
-    assert 'id="sidebar-new-task"' in page
-    assert 'id="sidebar-project-settings"' in page
-    assert "sidebar-collapsed" in page
-    assert "function setSidebarCollapsed" in page
-    assert "prefers-reduced-motion: reduce" in page
-    assert "el.dataset.status = t.status" in page
-    assert 'el.setAttribute("aria-label", el.title)' in page
-    assert "function sessionStatuses" not in page
-    assert 'id="detail"' in page
-    assert "function loadThread" in page
-    assert "Send to agent" in page
-    assert 'dataset.mode = "comment"' in page
-    assert "list.append(agentActivity(task.id, task.live))" in page
-    assert 'message.className = "thread-message system activity"' in page
-    assert "body.append(live(t.id, t.live))" not in page
-    assert 'class="pill' not in page
-    assert "bootstrap-icons@1.13.1" in page
-    assert "bi bi-terminal" not in page
-    assert "statusIcons" in page
-    assert "${t.icon}" not in page
-    assert "📎" not in page
-    assert "--scene: #d9e0e1" in page
-    assert "--ink: #172022" in page
-    assert "--signal: #c83e34" in page
-    assert "--glass: #edf2f1" in page
-    assert "--glass-strong: #f7f9f8" in page
-    assert "--glass-soft: #e6eceb" in page
-    assert "--duration-fast: 120ms" in page
-    assert "--duration-base: 200ms" in page
-    assert "--duration-slow: 300ms" in page
-    assert "color-scheme: light dark" in page
-    assert "@media (prefers-color-scheme: dark)" in page
-    assert "@supports (color: light-dark(white, black))" in page
-    assert "@supports ((backdrop-filter: blur(1px))" in page
-    assert "backdrop-filter: blur(24px)" in page
-    assert "--radius-pane: 22px" in page
-    assert "--radius-composer: 18px" in page
-    assert "radial-gradient" in page
-    assert "box-shadow" in page
-    assert "@media (forced-colors: active)" in page
-    assert "transition: all" not in page
-    assert "{{styles}}" not in page
-    assert 'data-mobile-view="queue"' in page
-    assert "function setMobileView" in page
-    assert "function openComposerSheet" in page
-    assert "function submitOnEnter" in page
-    assert 'event.key !== "Enter" || event.shiftKey || event.isComposing' in page
-    assert "submitOnEnter(event, composer)" in page
-    assert "let composerSubmitting = false" in page
-    assert "if (composerSubmitting) return" in page
-    assert 'id="file-trigger"' in page
-    assert 'id="file" hidden' in page
-    assert "picker.hidden = true" in page
-    assert "element.tabIndex >= 0" in page
-    assert 'id="mobile-queue"' in page
-    assert 'id="mobile-task"' in page
-    assert 'id="mobile-new-task"' in page
-    assert 'aria-disabled="true"' in page
-    assert 'aria-modal="true"' in page
-    assert 'id="composer-backdrop"' in page
-    assert "previousTaskStates" in page
-    assert "taskStateHistoryReady" in page
-    assert 'data-motion' in page
-    assert "finalizeComposerClose" in page
-    assert "composerTransitionToken" in page
-    assert "composerSheetState" in page
-    assert "composerCloseTimer" in page
-    assert 'classList.add("is-closing")' in page
-    assert "composerSheetPanel.addEventListener(\"transitionend\"" in page
-    assert 'document.createElement("button")' in page
-    assert 'aria-current' in page
-    assert 'el.setAttribute("aria-label", label)' in page
-    assert 'if (!isMobileViewport() && !composerSheet.hidden) {' in page
-    assert 'closeComposerSheet();\n    document.getElementById("text").focus()' in page
-    assert 'document.getElementById("text").focus()' in page
-    assert 'link.rel = "noopener noreferrer"' in page
-    assert "data-design" not in page
-    assert "designPicker" not in page
-    assert 'id="setup-form"' in page
-    assert 'fetch("/api/setup"' in page
-    assert 'id="setup-agent"' in page
-    assert 'id="setup-environment"' in page
-    assert 'id="setup-summary"' in page
-    assert 'id="setup-external"' in page
-    assert 'id="setup-fixer"' not in page
-    assert 'id="setup-reviewer"' not in page
-    assert 'id="setup-work-mode"' not in page
-    assert 'id="setup-constraints"' not in page
+        body = response.read()
+        page = body.decode("utf-8")
+        assert response.status == 200
+        assert response.headers.get_content_type() == "text/html"
+        assert int(response.headers["Content-Length"]) == len(body)
+        assert response.headers["Cache-Control"] == "no-store"
+        assert (
+            response.headers["Content-Security-Policy"]
+            == "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+            "img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'"
+        )
+
+    runtime_id = front.tasks_payload()["runtime"]["id"]
+    runtime_meta = (
+        '<meta name="mergerail-runtime-id" '
+        f'content="{escape(runtime_id, quote=True)}" />'
+    )
+    assert runtime_meta in page
+    assert page.replace(runtime_meta + "\n    ", "", 1) == index.read_text(encoding="utf-8")
+    assert page.lstrip().lower().startswith("<!doctype html>")
+    assert "<html" in page.lower() and "<body" in page.lower() and "</html>" in page.lower()
+
+    references = re.findall(r"(?:src|href)=[\"']([^\"']+)[\"']", page)
+    assert references, "the packaged shell should reference its runtime assets"
+    for reference in references:
+        parsed = urllib.parse.urlsplit(reference)
+        assert not parsed.scheme and not parsed.netloc, reference
+        assert reference.startswith("/assets/"), reference
+
+    assets = package_root / "dist" / "assets"
+    candidates = sorted(
+        path
+        for path in assets.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".css", ".js"}
+    )
+    assert candidates, "packaged Vite runtime assets are missing"
+    asset = candidates[0]
+    asset_url = "/assets/" + asset.relative_to(assets).as_posix()
+    with urllib.request.urlopen(f"http://127.0.0.1:{front.port}{asset_url}", timeout=5) as response:
+        asset_body = response.read()
+        expected_type = "text/css" if asset.suffix.lower() == ".css" else "text/javascript"
+        assert response.status == 200
+        assert response.headers.get_content_type() == expected_type
+        assert int(response.headers["Content-Length"]) == len(asset_body) == asset.stat().st_size
+        assert response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert asset_body == asset.read_bytes()
+
+    for path in (
+        "/assets/not-a-real-build-file.js",
+        "/assets/../index.html",
+        "/assets/%2e%2e/index.html",
+        "/assets/%2Fetc/passwd",
+    ):
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(f"http://127.0.0.1:{front.port}{path}", timeout=5)
+        assert caught.value.code == 404
+
+
+def test_runtime_meta_escapes_attribute_content() -> None:
+    page = web_module._index_with_runtime(
+        b"<html><head></head><body></body></html>",
+        'runtime\"><script>alert(1)</script>',
+    )
+    assert page is not None
+    assert b'<script>alert(1)</script>' not in page
+    assert b'content="runtime&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"' in page
+
+
+def test_web_front_keeps_an_immutable_asset_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = WebFront(TaskStore(tmp_path / "current.json"), port=0)
+    replacement: WebFront | None = None
+    current.start()
+
+    def read(front: WebFront, path: str) -> bytes:
+        with urllib.request.urlopen(f"http://127.0.0.1:{front.port}{path}", timeout=5) as response:
+            return bytes(response.read())
+
+    try:
+        original_index = read(current, "/")
+        (asset_path,) = re.findall(rb'(?:src|href)=["\'](/assets/[^"\']+)["\']', original_index)[:1]
+        original_asset = read(current, asset_path.decode())
+        original_login = current.login_page()
+        original_login_css = read(current, "/login.css")
+
+        next_index = (
+            b'<!doctype html><html><head><script src="/assets/index-next.js"></script>'
+            b'<link rel="stylesheet" href="/assets/index-next.css"></head><body></body></html>'
+        )
+        resources = {
+            ("dist", "index.html"): next_index,
+            ("dist", "assets", "index-next.js"): b"next javascript",
+            ("dist", "assets", "index-next.css"): b"next css",
+            ("login.html",): b"<html>next login {{error}}</html>",
+            ("login.css",): b"next login css",
+            ("login.js",): b"next login javascript",
+        }
+        monkeypatch.setattr(web_module, "_resource_bytes", lambda *parts: resources.get(parts))
+        monkeypatch.setattr(
+            web_module,
+            "_dist_asset_bytes",
+            lambda parts: resources.get(("dist", "assets", *parts)),
+        )
+
+        assert read(current, "/") == original_index
+        assert read(current, asset_path.decode()) == original_asset
+        assert current.login_page() == original_login
+        assert read(current, "/login.css") == original_login_css
+
+        replacement = WebFront(TaskStore(tmp_path / "replacement.json"), port=0)
+        replacement.start()
+        replacement_index = read(replacement, "/")
+        assert b'/assets/index-next.js' in replacement_index
+        assert read(replacement, "/assets/index-next.js") == b"next javascript"
+        assert replacement.login_page() == "<html>next login </html>"
+        assert read(replacement, "/login.css") == b"next login css"
+    finally:
+        current.stop()
+        if replacement is not None:
+            replacement.stop()
 
 
 def test_a_posted_task_lands_on_the_queue(front: WebFront) -> None:
@@ -343,6 +376,16 @@ def test_task_payload_is_paginated(tmp_path: Path) -> None:
     assert [task["text"] for task in payload["tasks"]] == ["task 3", "task 2"]
 
 
+def test_each_web_front_has_distinct_versioned_runtime_metadata(tmp_path: Path) -> None:
+    first = WebFront(TaskStore(tmp_path / "first.json"))
+    second = WebFront(TaskStore(tmp_path / "second.json"))
+
+    first_runtime = first.tasks_payload()["runtime"]
+    second_runtime = second.tasks_payload()["runtime"]
+    assert first_runtime["version"] == second_runtime["version"] == __version__
+    assert first_runtime["id"] != second_runtime["id"]
+
+
 def test_live_agent_output_is_attached_to_its_task(front: WebFront) -> None:
     task = front.store.add("fix it", source="web")
     front.stream(task, StreamEvent("runner", "reset"))
@@ -378,11 +421,14 @@ def test_live_output_and_completed_traces_are_bounded(front: WebFront) -> None:
 
 def test_sse_sends_the_current_queue_immediately(front: WebFront) -> None:
     front.store.add("stream me", source="web")
+    rest_payload = call(front, "/api/tasks")
     with urllib.request.urlopen(f"http://127.0.0.1:{front.port}/api/events", timeout=5) as response:
         assert response.headers.get_content_type() == "text/event-stream"
         lines = [response.readline().decode("utf-8") for _ in range(3)]
     data = next(line.removeprefix("data: ") for line in lines if line.startswith("data: "))
-    assert json.loads(data)["tasks"][0]["text"] == "stream me"
+    sse_payload = json.loads(data)
+    assert sse_payload["tasks"][0]["text"] == "stream me"
+    assert sse_payload["runtime"] == rest_payload["runtime"]
 
 
 def test_an_attachment_is_saved_next_to_the_queue(front: WebFront, tmp_path: Path) -> None:
@@ -446,7 +492,7 @@ def test_unknown_paths_are_404(front: WebFront) -> None:
     assert caught.value.code == 404
 
 
-def test_auth_uses_the_styled_login_and_protects_api_and_sse(tmp_path: Path) -> None:
+def test_auth_uses_packaged_login_and_protects_api_and_sse(tmp_path: Path) -> None:
     served = WebFront(TaskStore(tmp_path / "tasks.json"), port=0)
     served.enable_auth("mergerail", "correct-horse")
     served.store.add("protected task")
@@ -456,18 +502,42 @@ def test_auth_uses_the_styled_login_and_protects_api_and_sse(tmp_path: Path) -> 
         with urllib.request.urlopen(root + "/", timeout=5) as response:
             page = response.read().decode("utf-8")
             assert response.url.endswith("/login")
-        assert "Control room locked" in page
-        assert "Enter your MergeRail web credentials" in page
-        assert "Unlock" in page
-        assert "bootstrap-icons@1.13.1" in page
-        assert "login-shell" in page
-        assert 'inert aria-label="Locked task queue"' in page
+            assert response.headers["Cache-Control"] == "no-store"
+            assert (
+                response.headers["Content-Security-Policy"]
+                == "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+                "img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; "
+                "frame-ancestors 'none'"
+            )
+        assert page.lstrip().lower().startswith("<!doctype html>")
+        assert "Sign in to continue" in page
+        assert "login.css" in page
+        assert "login.js" in page
+        assert "https://" not in page and "http://" not in page
         assert "{{styles}}" not in page
-        assert "--scene: #d9e0e1" in page
-        assert "--glass-strong: #f7f9f8" in page
-        assert "backdrop-filter: blur(24px)" in page
-        assert "radial-gradient" in page
-        assert "box-shadow" in page
+
+        package_root = Path(__file__).parents[1] / "src/mergerail/fronts/web_assets"
+        for name, content_type in (("login.css", "text/css"), ("login.js", "text/javascript")):
+            local = package_root / name
+            assert local.is_file(), f"missing packaged {name}"
+            with urllib.request.urlopen(root + f"/{name}", timeout=5) as response:
+                asset_body = response.read()
+                assert response.status == 200
+                assert response.headers.get_content_type() == content_type
+                assert int(response.headers["Content-Length"]) == len(asset_body)
+                assert response.headers["Cache-Control"] == "no-cache"
+                assert response.headers["X-Content-Type-Options"] == "nosniff"
+            assert asset_body == local.read_bytes()
+
+        dist_assets = package_root / "dist" / "assets"
+        runtime = next(path for path in sorted(dist_assets.rglob("*")) if path.is_file())
+        runtime_url = root + "/assets/" + runtime.relative_to(dist_assets).as_posix()
+        with urllib.request.urlopen(runtime_url, timeout=5) as response:
+            runtime_body = response.read()
+            assert response.status == 200
+            assert int(response.headers["Content-Length"]) == len(runtime_body)
+            assert response.headers["Cache-Control"].endswith("immutable")
+        assert runtime_body == runtime.read_bytes()
 
         with pytest.raises(urllib.error.HTTPError) as denied:
             urllib.request.urlopen(root + "/api/tasks", timeout=5)
@@ -503,7 +573,7 @@ def test_auth_uses_the_styled_login_and_protects_api_and_sse(tmp_path: Path) -> 
         )
         with browser.open(login, timeout=5) as response:
             assert response.url == root + "/"
-            assert 'class="workbench"' in response.read().decode("utf-8")
+            assert '<div id="app"></div>' in response.read().decode("utf-8")
         (session,) = list(cookies)
         assert session.name == "mergerail_session"
         assert session.has_nonstandard_attr("HttpOnly")

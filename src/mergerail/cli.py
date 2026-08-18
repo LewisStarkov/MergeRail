@@ -15,6 +15,8 @@ from .backends import BackendInfo, BackendRegistry
 from .backends.policy import strict_security_gaps
 from .config import CONFIG_NAME, Config, ensure_state_ignored, write_config
 from .delivery import LOCAL, can_open_pr, resolve_mode
+from .fronts.base import Front
+from .fronts.web import LOCAL_HOSTS, WebFront
 from .gitctl import current_branch, has_commits, is_repo, repo_root
 from .runner import Runner
 from .share import NgrokTunnel, Share
@@ -601,6 +603,25 @@ def _share(args: argparse.Namespace, config: Config, front: str) -> Share | None
     )
 
 
+def _runtime_updates_enabled(
+    args: argparse.Namespace, argv: list[str] | None, front: Front
+) -> bool:
+    """Runtime replacement is intentionally limited to the local Web service."""
+    return bool(
+        argv is None
+        and args.command == "run"
+        and args.web
+        and not args.telegram
+        and not args.front
+        and not args.once
+        and not args.share
+        and not args.no_update
+        and isinstance(front, WebFront)
+        and front.host in LOCAL_HOSTS
+        and not front.unsafe_expose
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     # ``mergerail --telegram`` has meant "run" since before there were
@@ -620,9 +641,10 @@ def main(argv: list[str] | None = None) -> int:
         and updater.auto_update()
     ):
         try:
-            return updater.relaunch(arguments)
+            updater.relaunch(arguments)
         except updater.UpdateError as error:
             print(f"mergerail: could not restart after updating: {error}", file=sys.stderr)
+            return 1
     config = resolve(args)
 
     if args.command == "init":
@@ -663,13 +685,19 @@ def main(argv: list[str] | None = None) -> int:
     if not ready and not allows_setup:
         return 1
     share = _share(args, config, front)
-    runner = Runner(
-        config,
-        front,
-        supervise=not args.no_process,
-        share=share,
-        allow_setup=allows_setup,
-    )
+    def make_runner() -> Runner:
+        current = Runner(
+            config,
+            front,
+            supervise=not args.no_process,
+            share=share,
+            allow_setup=allows_setup,
+        )
+        if _runtime_updates_enabled(args, argv, current.front):
+            current.update_probe = updater.runtime_candidate
+        return current
+
+    runner = make_runner()
 
     def stop(*_: object) -> None:
         log.info("mergerail.stopping")
@@ -679,8 +707,31 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(signal, "SIGTERM"):  # Windows knows the name but never delivers it
         signal.signal(signal.SIGTERM, stop)
 
-    runner.run(once=args.once)
-    return 0
+    while True:
+        candidate = runner.run(once=args.once)
+        if candidate is None:
+            return 0
+        if runner.stopping:
+            return 0
+        if updater.install_candidate(candidate):
+            if runner.stopping:
+                return 0
+            try:
+                updater.relaunch(arguments)
+            except updater.UpdateError as error:
+                print(
+                    "mergerail: could not activate the installed update; "
+                    f"restart manually: {error}",
+                    file=sys.stderr,
+                )
+                return 1
+        else:
+            print(
+                "mergerail: continuing on the current version; "
+                "the update check will retry after the normal interval",
+                file=sys.stderr,
+            )
+        runner = make_runner()
 
 
 if __name__ == "__main__":  # pragma: no cover

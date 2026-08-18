@@ -5,12 +5,11 @@ the task in, the queue underneath, a file picker for screenshots. Durable task
 state stays in the shared JSON queue; transient agent output reaches the page
 through a local server-sent event stream.
 
-No framework on purpose, on either side. The server is ``http.server`` from
-the standard library in one daemon thread; the packaged page uses Bootstrap
-Icons from its published CDN. Attachments arrive as base64 inside the
-JSON body rather than as multipart, because parsing multipart without ``cgi`` —
-removed in 3.13 — is a project of its own, and a 20 MB cap makes the difference
-irrelevant.
+The server is Python's standard-library ``http.server`` in one daemon thread;
+the UI is a self-hosted, packaged Vite build with no runtime Python
+dependencies. Attachments arrive as base64 inside the JSON body rather than as
+multipart, because parsing multipart without ``cgi`` — removed in 3.13 — is a
+project of its own, and a 20 MB cap makes the difference irrelevant.
 
 It binds to localhost by default. A wider bind requires configured credentials
 unless the operator explicitly opts into an unsafe unauthenticated exposure.
@@ -27,12 +26,14 @@ import secrets
 import threading
 import time
 from contextlib import suppress
+from html import escape
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .. import log
 from ..tasks import Status, Task, TaskStore
@@ -58,6 +59,36 @@ MAX_SETUP_BYTES = 64 * 1024
 MAX_MESSAGE_PAGE = 200
 MAX_MESSAGE_TEXT_CHARS = 100_000
 MAX_IDEMPOTENCY_KEY_CHARS = 200
+
+WEB_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+    "img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; "
+    "frame-ancestors 'none'"
+)
+STATIC_CACHE_CONTROL = "public, max-age=31536000, immutable"
+LOGIN_ASSET_CACHE_CONTROL = "no-cache"
+
+_MIME_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".gif": "image/gif",
+    ".html": "text/html; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".ttf": "font/ttf",
+    ".wasm": "application/wasm",
+    ".webp": "image/webp",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+}
+
+_LOGIN_ASSETS = {"/login.css", "/login.js"}
 
 SESSION_COOKIE = "mergerail_session"
 
@@ -92,6 +123,15 @@ class WebFront(Front):
         self.thread: threading.Thread | None = None
         self._condition = threading.Condition()
         self._version = 0
+        from .. import __version__
+
+        self._runtime = {"id": secrets.token_urlsafe(16), "version": __version__}
+        (
+            self._index_html,
+            self._packaged_assets,
+            self._login_page,
+            self._login_assets,
+        ) = _snapshot_web_assets(self._runtime["id"])
         self._stopping = False
         self._live: dict[int, dict[str, Any]] = {}
         self._setup_progress: dict[str, Any] = {
@@ -347,12 +387,16 @@ class WebFront(Front):
             for task in tasks[offset : offset + limit]
         ]
         return {
+            "runtime": dict(self._runtime),
             "tasks": rows,
             "total": len(tasks),
             "offset": offset,
             "limit": limit,
             "setup": self.setup_payload(progress),
         }
+
+    def login_page(self, error: str = "") -> str:
+        return self._login_page.replace("{{error}}", error)
 
     def setup_payload(self, progress: dict[str, Any] | None = None) -> dict[str, Any]:
         with self._condition:
@@ -580,18 +624,29 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         target = urlsplit(self.path)
+        # Login CSS/JS must load before authentication; keep that public surface allowlisted.
+        if target.path.startswith("/assets/") or target.path == "/assets":
+            self._packaged_asset(target.path)
+            return
+        if target.path in _LOGIN_ASSETS:
+            self._login_asset(target.path)
+            return
         if target.path == "/login":
             if self.front.authenticated(self.headers.get("Cookie", "")):
                 self._redirect("/")
             else:
                 self._html(
-                    LOGIN_PAGE.replace("{{error}}", ""), headers={"Cache-Control": "no-store"}
+                    self.front.login_page(),
+                    headers={
+                        "Cache-Control": "no-store",
+                        "Content-Security-Policy": WEB_CSP,
+                    },
                 )
             return
         if not self._authorized():
             return
         if target.path in ("/", "/index.html"):
-            self._html(PAGE)
+            self._spa_page()
         elif target.path == "/api/tasks":
             query = parse_qs(target.query)
             try:
@@ -678,15 +733,76 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _html(self, page: str, *, status: int = 200, headers: dict[str, str] | None = None) -> None:
-        body = page.encode("utf-8")
+    def _bytes(
+        self,
+        body: bytes,
+        *,
+        status: int = 200,
+        content_type: str = "application/octet-stream",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _html(self, page: str, *, status: int = 200, headers: dict[str, str] | None = None) -> None:
+        self._bytes(
+            page.encode("utf-8"),
+            status=status,
+            content_type="text/html; charset=utf-8",
+            headers=headers,
+        )
+
+    def _spa_page(self) -> None:
+        body = self.front._index_html
+        if body is None:
+            self._json(503, {"error": "packaged web assets are unavailable"})
+            return
+        self._bytes(
+            body,
+            content_type="text/html; charset=utf-8",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": WEB_CSP,
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    def _packaged_asset(self, path: str) -> None:
+        parts = _safe_asset_parts(path)
+        if parts is None:
+            self._json(404, {"error": "not found"})
+            return
+        body = self.front._packaged_assets.get(parts)
+        if body is None:
+            self._json(404, {"error": "not found"})
+            return
+        self._bytes(
+            body,
+            content_type=_mime_type(parts[-1]),
+            headers={
+                "Cache-Control": STATIC_CACHE_CONTROL,
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    def _login_asset(self, path: str) -> None:
+        body = self.front._login_assets.get(path)
+        if body is None:
+            self._json(404, {"error": "not found"})
+            return
+        self._bytes(
+            body,
+            content_type=_mime_type(path),
+            headers={
+                "Cache-Control": LOGIN_ASSET_CACHE_CONTROL,
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     def _authorized(self) -> bool:
         if self.front.authenticated(self.headers.get("Cookie", "")):
@@ -728,18 +844,18 @@ class _Handler(BaseHTTPRequestHandler):
         self._redirect("/", headers={"Set-Cookie": cookie})
 
     def _login_failed(self, *, status: int = 401) -> None:
-        error = (
-            '<div class="login-error" role="alert">'
-            '<i class="bi bi-exclamation-circle" aria-hidden="true"></i>'
-            "Those credentials do not match.</div>"
-        )
+        error = '<div class="login-error" role="alert">Those credentials do not match.</div>'
         self._html(
-            LOGIN_PAGE.replace("{{error}}", error),
+            self.front.login_page(error),
             status=status,
             headers=(
-                {"Cache-Control": "no-store", "Retry-After": "60"}
+                {
+                    "Cache-Control": "no-store",
+                    "Content-Security-Policy": WEB_CSP,
+                    "Retry-After": "60",
+                }
                 if status == 429
-                else {"Cache-Control": "no-store"}
+                else {"Cache-Control": "no-store", "Content-Security-Policy": WEB_CSP}
             ),
         )
 
@@ -788,12 +904,117 @@ class _Handler(BaseHTTPRequestHandler):
             self.front.release_stream()
 
 
+def _resource(*parts: str) -> Traversable:
+    return files(__package__).joinpath("web_assets", *parts)
+
+
+def _resource_bytes(*parts: str) -> bytes | None:
+    try:
+        resource = _resource(*parts)
+        if not resource.is_file():
+            return None
+        return resource.read_bytes()
+    except (OSError, ValueError):
+        return None
+
+
+def _resource_text(*parts: str) -> str:
+    body = _resource_bytes(*parts)
+    return body.decode("utf-8") if body is not None else ""
+
+
+def _snapshot_web_assets(
+    runtime_id: str,
+) -> tuple[bytes | None, dict[tuple[str, ...], bytes], str, dict[str, bytes]]:
+    index = _index_with_runtime(_resource_bytes("dist", "index.html"), runtime_id)
+    assets: dict[tuple[str, ...], bytes] = {}
+    if index is not None:
+        for reference in re.findall(r'(?:src|href)=["\']([^"\']+)["\']', index.decode("utf-8")):
+            target = urlsplit(reference)
+            if target.scheme or target.netloc:
+                continue
+            parts = _safe_asset_parts(target.path)
+            if parts is None:
+                continue
+            body = _dist_asset_bytes(parts)
+            if body is not None:
+                assets[parts] = body
+    login_assets = {
+        path: body
+        for path in _LOGIN_ASSETS
+        if (body := _resource_bytes(path.lstrip("/"))) is not None
+    }
+    return index, assets, _resource_text("login.html"), login_assets
+
+
+def _index_with_runtime(index: bytes | None, runtime_id: str) -> bytes | None:
+    if index is None:
+        return None
+    try:
+        page = index.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    closing_head = re.search(r"</head\s*>", page, re.IGNORECASE)
+    if closing_head is None:
+        return None
+    meta = (
+        '<meta name="mergerail-runtime-id" '
+        f'content="{escape(runtime_id, quote=True)}" />\n    '
+    )
+    return (page[: closing_head.start()] + meta + page[closing_head.start() :]).encode()
+
+
+def _safe_asset_parts(path: str) -> tuple[str, ...] | None:
+    """Return safe, decoded path components for a packaged asset request."""
+    prefix = "/assets/"
+    if not path.startswith(prefix):
+        return None
+    encoded = path[len(prefix) :]
+    if not encoded or encoded.endswith("/") or "//" in encoded:
+        return None
+    try:
+        decoded = unquote(encoded)
+    except (UnicodeError, ValueError):
+        return None
+    if (
+        not decoded
+        or decoded.startswith(("/", "\\"))
+        or "\\" in decoded
+        or "\x00" in decoded
+        or any(ord(character) < 0x20 for character in decoded)
+    ):
+        return None
+    parts = tuple(decoded.split("/"))
+    if not parts or any(not part or part in {".", ".."} for part in parts):
+        return None
+    return parts
+
+
+def _dist_asset_bytes(parts: tuple[str, ...]) -> bytes | None:
+    root = _resource("dist", "assets")
+    try:
+        candidate = root.joinpath(*parts)
+        if not candidate.is_file():
+            return None
+        if isinstance(root, Path) and isinstance(candidate, Path):
+            candidate.resolve().relative_to(root.resolve())
+        return candidate.read_bytes()
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _mime_type(path: str) -> str:
+    return _MIME_TYPES.get(Path(path).suffix.lower(), "application/octet-stream")
+
+
 def _asset(name: str) -> str:
-    return files(__package__).joinpath("web_assets", name).read_text(encoding="utf-8")
+    """Read a web asset for backwards-compatible module exports."""
+    return _resource_text(*name.split("/"))
 
 
-CONTROL_ROOM_CSS = _asset("control_room.css")
-PAGE = _asset("index.html").replace("{{styles}}", CONTROL_ROOM_CSS)
-LOGIN_PAGE = _asset("login.html").replace("{{styles}}", CONTROL_ROOM_CSS)
+# Deprecated compatibility exports.
+CONTROL_ROOM_CSS = ""
+PAGE = _resource_text("dist", "index.html")
+LOGIN_PAGE = _asset("login.html")
 
 __all__ = ["CONTROL_ROOM_CSS", "LOGIN_PAGE", "MAX_FILE_BYTES", "PAGE", "WebFront"]

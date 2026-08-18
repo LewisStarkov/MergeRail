@@ -18,10 +18,22 @@ mergerail run --web
 
 MergeRail checks the repository for a newer stable `vX.Y.Z` tag before `run` and
 `once`, at most once every 24 hours. It installs updates with `uv tool` and
-restarts before taking ownership of the queue. Use `mergerail update --check` to
-check manually, `mergerail update` to install immediately, or `--no-update` /
-`MERGERAIL_AUTO_UPDATE=0` to disable the automatic check. A fork can set
-`MERGERAIL_UPDATE_REPOSITORY` to its Git URL.
+restarts before taking ownership of the queue. A long-running local
+`mergerail run --web` also probes while idle: pending delivery finishes first,
+no new task is claimed, and installation starts only after the Web front,
+configured process, agent sessions, and runner lease have shut down. The updated
+release is pinned to the exact remote Git object observed by the probe, installed
+once across concurrent runners, and then replaces the current process (or uses a
+clean child handoff on Windows). If installation fails, the current service starts
+again and waits for the normal check interval. If activation fails after a
+successful install, MergeRail exits nonzero instead of resuming stale code; restart
+it manually to use the installed release. Runtime replacement is not enabled for
+`once`, programmatic CLI calls, custom fronts, non-local or unsafe Web instances,
+shared Web servers, or `--no-update` runs.
+
+Use `mergerail update --check` to check manually, `mergerail update` to install
+immediately, or `--no-update` / `MERGERAIL_AUTO_UPDATE=0` to disable the automatic
+check. A fork can set `MERGERAIL_UPDATE_REPOSITORY` to its Git URL.
 
 ## Let your coding agent start MergeRail
 
@@ -286,11 +298,16 @@ it. `mergerail doctor` validates both the queue and runner lease location.
 
 Folder, Telegram and localhost Web fronts ship with the package. Web uses
 server-sent events to show fixer/reviewer output and tool activity as it
-arrives, with polling only as a reconnect fallback. Non-local binding is
-refused unless username/password authentication is configured; the explicit
-`--unsafe-expose` override is intended only for an already protected network.
-Login attempts, sessions, page sizes and simultaneous event streams are
-bounded. A custom front implements two required methods; `stream` is optional:
+arrives, with polling only as a reconnect fallback. Its self-hosted operations
+workspace uses a compact queue ledger, chronological task activity, search and
+status views, setup and command drawers, keyboard navigation, saved density and
+light/dark preferences, saved queue-panel state, and visible feedback for failed
+actions. The compiled browser assets ship inside the Python package and make no
+CDN or third-party runtime requests. Non-local binding is refused unless
+username/password authentication is configured; the explicit `--unsafe-expose`
+override is intended only for an already protected network. Login attempts,
+sessions, page sizes and simultaneous event streams are bounded. A custom front
+implements two required methods; `stream` is optional:
 
 ```python
 class Front:

@@ -100,7 +100,9 @@ creates one-session credentials unless a custom Traffic Policy is supplied.
 
 ## Release gate
 
-CI runs Ruff, strict mypy, the full test suite with branch coverage of at least
-80%, on Linux, macOS and Windows. Tag releases repeat those checks, require the
-tag `vX.Y.Z` to match the package version, build both distributions and run
-`twine check` before trusted publishing to PyPI.
+CI runs Ruff, strict mypy, and the full Python test suite with branch coverage
+of at least 80% on Linux, macOS, and Windows. A separate Node 22 job runs the
+Preact typecheck, component tests, and Vite build, then verifies that the
+packaged browser assets are current. Tag releases repeat those checks, require
+the tag `vX.Y.Z` to match the package version, build both distributions, and
+run `twine check` before trusted publishing to PyPI.
