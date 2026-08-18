@@ -105,7 +105,8 @@ def test_the_page_is_served(front: WebFront) -> None:
         f'content="{escape(runtime_id, quote=True)}" />'
     )
     assert runtime_meta in page
-    assert page.replace(runtime_meta + "\n    ", "", 1) == index.read_text(encoding="utf-8")
+    served_index = page.replace(runtime_meta + "\n    ", "", 1).replace("\r\n", "\n")
+    assert served_index == index.read_text(encoding="utf-8")
     assert page.lstrip().lower().startswith("<!doctype html>")
     assert "<html" in page.lower() and "<body" in page.lower() and "</html>" in page.lower()
 
