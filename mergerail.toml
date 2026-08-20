@@ -1,7 +1,7 @@
 # MergeRail — written by `mergerail init` from what this repository looks like.
 # Everything here is optional; delete a line to go back to the detected value.
 
-base_branch = "master"
+base_branch = "main"
 
 # auto: open a PR when origin exists, otherwise merge locally.
 # local / pr force one strategy; merge is a deprecated alias for local.

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 250" role="img" aria-labelledby="title">
+  <title id="title">MergeRail</title>
+  <text x="32" y="186" font-size="164" font-weight="500" text-rendering="geometricPrecision">
+    <tspan fill="#111513" font-family="ui-rounded, 'Avenir Next Rounded', 'Nunito Sans', 'Segoe UI', sans-serif" letter-spacing="-6">Merge</tspan><tspan fill="#1557ff" font-family="ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace" font-weight="600" letter-spacing="-5">Rail</tspan>
+  </text>
+</svg>

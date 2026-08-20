@@ -1,4 +1,6 @@
-# MergeRail
+<h1 align="center">
+  <img src="docs/assets/mergerail-logo.svg" alt="MergeRail" width="520">
+</h1>
 
 MergeRail is a local, provider-neutral queue for coding agents. A fixer handles
 the task, repository checks run, a separately configured reviewer accepts or

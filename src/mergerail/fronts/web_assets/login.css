@@ -1,66 +1,70 @@
 :root {
   color-scheme: light dark;
-  --canvas: #eceeeb;
-  --surface: #f8f9f6;
-  --surface-muted: #f1f3ef;
-  --ink: #1e2522;
-  --muted: #626b66;
-  --line: #cfd5d0;
-  --line-strong: #aeb7b1;
-  --accent: #315f59;
-  --accent-strong: #244c47;
-  --accent-soft: #e2ebe8;
+  --canvas: #f4f6fb;
+  --surface: #fafbff;
+  --surface-muted: #edf1fb;
+  --ink: #111513;
+  --muted: #626b7a;
+  --line: #d7ddeb;
+  --line-strong: #bbc4d8;
+  --accent: #1557ff;
+  --accent-strong: #1046cc;
+  --accent-soft: #e8eeff;
   --danger: #a93636;
   --danger-soft: #f5e6e4;
+  --brand-blue: #1557ff;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #151917;
-    --surface: #1b211e;
-    --surface-muted: #202824;
-    --ink: #edf1ee;
-    --muted: #9da8a1;
-    --line: #343d38;
-    --line-strong: #59655e;
-    --accent: #75a9a0;
-    --accent-strong: #9ac4bc;
-    --accent-soft: #20332f;
+    --canvas: #0d1018;
+    --surface: #131722;
+    --surface-muted: #1d2433;
+    --ink: #f3f5fb;
+    --muted: #a7b0c2;
+    --line: #2c3445;
+    --line-strong: #414c62;
+    --accent: #6690ff;
+    --accent-strong: #8ba9ff;
+    --accent-soft: #18264c;
     --danger: #e37a75;
     --danger-soft: #3a2423;
+    --brand-blue: #6690ff;
   }
 }
 
 html[data-theme="light"] {
   color-scheme: light;
-  --canvas: #eceeeb;
-  --surface: #f8f9f6;
-  --surface-muted: #f1f3ef;
-  --ink: #1e2522;
-  --muted: #626b66;
-  --line: #cfd5d0;
-  --line-strong: #aeb7b1;
-  --accent: #315f59;
-  --accent-strong: #244c47;
-  --accent-soft: #e2ebe8;
+  --canvas: #f4f6fb;
+  --surface: #fafbff;
+  --surface-muted: #edf1fb;
+  --ink: #111513;
+  --muted: #626b7a;
+  --line: #d7ddeb;
+  --line-strong: #bbc4d8;
+  --accent: #1557ff;
+  --accent-strong: #1046cc;
+  --accent-soft: #e8eeff;
   --danger: #a93636;
   --danger-soft: #f5e6e4;
+  --brand-blue: #1557ff;
 }
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --canvas: #151917;
-  --surface: #1b211e;
-  --surface-muted: #202824;
-  --ink: #edf1ee;
-  --muted: #9da8a1;
-  --line: #343d38;
-  --line-strong: #59655e;
-  --accent: #75a9a0;
-  --accent-strong: #9ac4bc;
-  --accent-soft: #20332f;
+  --canvas: #0d1018;
+  --surface: #131722;
+  --surface-muted: #1d2433;
+  --ink: #f3f5fb;
+  --muted: #a7b0c2;
+  --line: #2c3445;
+  --line-strong: #414c62;
+  --accent: #6690ff;
+  --accent-strong: #8ba9ff;
+  --accent-soft: #18264c;
   --danger: #e37a75;
   --danger-soft: #3a2423;
+  --brand-blue: #6690ff;
 }
 
 * { box-sizing: border-box; }
@@ -101,21 +105,11 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   text-decoration: none;
 }
 
-.login-brand > span:last-child { display: grid; line-height: 1.15; }
-.login-brand strong { font-size: 13px; letter-spacing: .01em; }
+.login-brand-copy { display: grid; line-height: 1.15; }
+.login-wordmark { display: flex; align-items: baseline; }
+.login-wordmark > span:first-child { font: 600 14px/1 ui-rounded, "Avenir Next Rounded", "Nunito Sans", "Segoe UI", sans-serif; letter-spacing: -.04em; }
+.login-wordmark > span:last-child { color: var(--brand-blue); font: 650 13px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -.05em; }
 .login-brand small { margin-top: 3px; color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-
-.login-mark {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 4px;
-  background: var(--ink);
-  color: var(--surface);
-  font: 700 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: .05em;
-}
 
 .login-local {
   display: inline-flex;

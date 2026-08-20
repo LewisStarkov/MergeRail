@@ -186,7 +186,10 @@ function TopBar({prefs, onTheme, onSidebar, onPalette, onSetup}: {
 }) {
   return <header class="topbar">
     <div class="topbar-left">
-      <div class="wordmark"><span class="rail-mark" aria-hidden="true" />MergeRail <span>operations</span></div>
+      <div class="wordmark" aria-label="MergeRail operations">
+        <span class="wordmark-merge">Merge</span><span class="wordmark-rail">Rail</span>
+        <span class="wordmark-context">operations</span>
+      </div>
       <button class="icon-button sidebar-toggle" onClick={onSidebar} aria-controls="task-queue"
         aria-expanded={!prefs.sidebarCollapsed} aria-label={prefs.sidebarCollapsed ? "Expand task queue" : "Collapse task queue"}
         title={prefs.sidebarCollapsed ? "Expand task queue" : "Collapse task queue"}><Icon name="sidebar" /></button>
