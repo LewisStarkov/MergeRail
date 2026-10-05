@@ -36,7 +36,8 @@ def test_archive_preserves_bytes_modes_and_inward_links(tmp_path: Path) -> None:
     target = tmp_path / "repo"
     worker._safe_extract_workspace(source, target, limit_bytes=100)
     assert (target / "dir/tool").read_bytes() == b"body"
-    assert os.access(target / "dir/tool", os.X_OK)
+    if sys.platform != "win32":
+        assert os.access(target / "dir/tool", os.X_OK)
     assert (target / "link").is_symlink()
     assert (target / "link").read_bytes() == b"body"
 

@@ -113,6 +113,7 @@ def _tar(path: Path, entries: list[tuple[str, bytes | str]]) -> None:
                 archive.addfile(member, io.BytesIO(value))
 
 
+@pytest.mark.skipif(os.name == "nt", reason="worker preparation requires POSIX user IDs")
 def test_snapshot_reset_and_prepare_use_only_named_commits(
     repo: Path, worker_paths: WorkerPaths, monkeypatch: pytest.MonkeyPatch
 ) -> None:
