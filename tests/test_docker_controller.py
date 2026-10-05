@@ -161,6 +161,7 @@ def test_task_id_rejection_does_not_change_metadata_or_create_paths(
 def test_context_rejects_a_remote_daemon_endpoint(
     monkeypatch: pytest.MonkeyPatch, execution: DockerExecution
 ) -> None:
+    monkeypatch.setattr("mergerail.execution.docker.platform.system", lambda: "Linux")
     monkeypatch.setenv("DOCKER_CONTEXT", "remote")
     calls: list[tuple[str, ...]] = []
 

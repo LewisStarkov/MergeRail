@@ -76,7 +76,9 @@ def recover_delivery(
         return Landing(False, "", str(error), stage="merge")
 
 
-def _transaction(root: Path, base_ref: str, base_sha: str, candidate: str) -> subprocess.Popen[str]:
+def _transaction(
+    root: Path, base_ref: str, base_sha: str, candidate: str
+) -> subprocess.Popen[bytes]:
     if host_git(root, "rev-parse", "--show-ref-format") != "files":
         raise RuntimeError("Docker delivery requires Git's files reference storage")
     host_git(root, "check-ref-format", base_ref)
@@ -92,23 +94,24 @@ def _transaction(root: Path, base_ref: str, base_sha: str, candidate: str) -> su
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
     )
     assert process.stdin is not None and process.stdout is not None
     # Updating HEAD locks both the symbolic reference and its referent.
     # Verify the branch while those prepared locks prevent a checkout change.
-    process.stdin.write(f"start\nupdate HEAD {candidate} {base_sha}\nprepare\n")
+    process.stdin.write(f"start\nupdate HEAD {candidate} {base_sha}\nprepare\n".encode("ascii"))
     process.stdin.flush()
     watchdog = threading.Timer(30, process.kill)
     watchdog.daemon = True
     watchdog.start()
     try:
         if (
-            process.stdout.readline().strip() != "start: ok"
-            or process.stdout.readline().strip() != "prepare: ok"
+            process.stdout.readline().strip() != b"start: ok"
+            or process.stdout.readline().strip() != b"prepare: ok"
         ):
             _, stderr = process.communicate(timeout=5)
-            raise RuntimeError("checkout or base changed: " + stderr.strip())
+            raise RuntimeError(
+                "checkout or base changed: " + stderr.decode(errors="replace").strip()
+            )
         head_lock = _ref_lock_paths(root, base_ref)[0]
         if host_git(root, "symbolic-ref", "--quiet", "HEAD") != base_ref or not head_lock.exists():
             raise RuntimeError("checkout or base changed during reference preparation")
@@ -169,18 +172,18 @@ def _apply_candidate(
         if outcome.returncode:
             raise RuntimeError("checkout refused: " + (outcome.stderr or outcome.stdout).strip())
         os.replace(temporary, index)
-        stdout, stderr = process.communicate("commit\n", timeout=30)
-        if process.returncode or "commit: ok" not in stdout:
+        stdout, stderr = process.communicate(b"commit\n", timeout=30)
+        if process.returncode or b"commit: ok" not in stdout:
             raise RuntimeError(
                 "reference commit failed; saved delivery journal requires recovery: "
-                + stderr.strip()
+                + stderr.decode(errors="replace").strip()
             )
         applied = False
         journal.unlink(missing_ok=True)
     finally:
         if process is not None and process.poll() is None:
             with contextlib.suppress(subprocess.SubprocessError, OSError):
-                process.communicate("abort\n", timeout=5)
+                process.communicate(b"abort\n", timeout=5)
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
@@ -237,9 +240,11 @@ def _recover_apply(root: Path, state_dir: Path, task_id: int) -> None:
         os.replace(temporary, index)
     if current == base_sha:
         process = _transaction(root, base_ref, base_sha, candidate)
-        stdout, stderr = process.communicate("commit\n", timeout=30)
-        if process.returncode or "commit: ok" not in stdout:
-            raise RuntimeError("cannot recover delivery reference: " + stderr.strip())
+        stdout, stderr = process.communicate(b"commit\n", timeout=30)
+        if process.returncode or b"commit: ok" not in stdout:
+            raise RuntimeError(
+                "cannot recover delivery reference: " + stderr.decode(errors="replace").strip()
+            )
     lock.unlink()
     temporary.unlink(missing_ok=True)
     journal.unlink()

@@ -650,7 +650,7 @@ def test_header_drip_cannot_hold_a_gateway_slot(monkeypatch: pytest.MonkeyPatch)
         for byte in b"GET /zen/v1/models HTTP/1.1":
             try:
                 right.sendall(bytes([byte]))
-            except BrokenPipeError:
+            except ConnectionError:
                 break
             time.sleep(0.03)
         else:

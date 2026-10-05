@@ -366,7 +366,7 @@ def test_export_tree_writes_regular_files_and_symlinks_without_git_metadata(
 ) -> None:
     source = tmp_path / "workspace"
     source.mkdir()
-    (source / "module.py").write_text("answer = 42\n", encoding="utf-8")
+    (source / "module.py").write_bytes(b"answer = 42\n")
     (source / "module-link").symlink_to("module.py")
     (source / ".git").mkdir()
     (source / ".git" / "config").write_text("private git state", encoding="utf-8")

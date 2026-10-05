@@ -198,6 +198,7 @@ def test_docker_refuses_remote_host_environment_before_cli(
     state = tmp_path / "state"
     policy = ExecutionPolicy(image="mergerail-runtime@sha256:" + "a" * 64)
     execution = DockerExecution(policy, root, state)
+    monkeypatch.setattr("mergerail.execution.docker.platform.system", lambda: "Linux")
     monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
     monkeypatch.setattr(
         execution, "_docker", lambda *args, **kwargs: pytest.fail("Docker CLI must not run")

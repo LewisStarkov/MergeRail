@@ -235,7 +235,7 @@ def test_valid_docker_config_roundtrips_without_probing_host_tools(
     assert seen == [True]
     assert config.execution == ExecutionPolicy(image=PIN)
     assert "execution" not in config.fronts
-    (root / "mergerail.toml").write_text(render_config(config))
+    (root / "mergerail.toml").write_text(render_config(config), encoding="utf-8")
     loaded = Config.load(root)
     assert loaded.execution == config.execution
     assert loaded.execution is not None and loaded.execution.digest == config.execution.digest

@@ -22,6 +22,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def candidate(repo: Path) -> tuple[str, str]:
+    run("config", "core.autocrlf", "false", cwd=repo)
     base = run("rev-parse", "HEAD", cwd=repo)
     run("checkout", "-qb", "candidate", cwd=repo)
     (repo / "new.txt").write_text("result\n")

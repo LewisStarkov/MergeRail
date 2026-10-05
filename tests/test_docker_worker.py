@@ -39,7 +39,9 @@ def test_archive_preserves_bytes_modes_and_inward_links(tmp_path: Path) -> None:
     if sys.platform != "win32":
         assert os.access(target / "dir/tool", os.X_OK)
     assert (target / "link").is_symlink()
-    assert (target / "link").read_bytes() == b"body"
+    assert os.readlink(target / "link") == "dir/tool"
+    if sys.platform != "win32":
+        assert (target / "link").read_bytes() == b"body"
 
 
 @pytest.mark.parametrize("name", ["../outside", "/outside", "dir/../../outside"])
@@ -130,9 +132,11 @@ def commit_index_entry(repo: Path, name: str, value: str, mode: str = "100644") 
     source = repo.parent / "git-blob-input"
     source.write_text(value)
     blob = run("hash-object", "-w", str(source), cwd=repo)
-    run("update-index", "--add", "--cacheinfo", f"{mode},{blob},{name}", cwd=repo)
-    run("commit", "-qm", "fixture tree", cwd=repo)
-    return run("rev-parse", "HEAD", cwd=repo)
+    # Build the hostile object directly: Windows Git refuses these paths in its index.
+    tree_input = repo.parent / "git-tree-input"
+    tree_input.write_bytes(mode.encode() + b" " + name.encode() + b"\0" + bytes.fromhex(blob))
+    tree = run("hash-object", "-t", "tree", "-w", str(tree_input), cwd=repo)
+    return run("commit-tree", tree, "-p", "HEAD", "-m", "fixture tree", cwd=repo)
 
 
 def test_tree_accepts_regular_source_and_internal_symlink(sandbox: Path) -> None:
