@@ -7,6 +7,7 @@ import io
 import json
 import os
 import signal
+import sys
 import tarfile
 import time
 from collections.abc import Mapping
@@ -424,8 +425,9 @@ def test_export_tree_enforces_archive_and_expanded_byte_limits(
         worker._export_tree(source, maximum=512, expanded_maximum=64 * 1024)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="FIFO creation is not portable to Windows")
 def test_export_tree_rejects_special_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if sys.platform == "win32":
+        pytest.skip("FIFO creation is not portable to Windows")
     source = tmp_path / "workspace"
     source.mkdir()
     os.mkfifo(source / "pipe")
@@ -457,10 +459,11 @@ def test_same_uid_enumeration_excludes_init_and_own_pid(
     assert worker._same_uid_processes(65534, 4242) == [(9001, "R")]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="process-state semantics are Linux-specific")
 def test_quiesce_stops_then_kills_only_active_peers_and_tolerates_zombies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if sys.platform == "win32":
+        pytest.skip("process-state semantics require a POSIX host")
     snapshots = iter(
         [
             [(9001, "S"), (9002, "Z"), (9003, "X")],
@@ -486,10 +489,11 @@ def test_quiesce_stops_then_kills_only_active_peers_and_tolerates_zombies(
     assert 9003 not in {pid for pid, _signum in signals}
 
 
-@pytest.mark.skipif(os.name == "nt", reason="process-state semantics are Linux-specific")
 def test_quiesce_fails_closed_when_peer_does_not_stop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if sys.platform == "win32":
+        pytest.skip("process-state semantics require a POSIX host")
     signals: list[tuple[int, int]] = []
     times = iter([0.0, 0.0, 6.0])
     monkeypatch.setattr(os, "geteuid", lambda: 65534, raising=False)

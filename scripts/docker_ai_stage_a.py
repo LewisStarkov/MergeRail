@@ -12,6 +12,7 @@ import json
 import os
 import resource
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -137,6 +138,8 @@ cat /sys/fs/cgroup/memory.peak
                 "--dns-option=attempts:1"])
 
         def log_bound() -> None:
+            if sys.platform == "win32":
+                raise RuntimeError("this probe requires a POSIX host")
             resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024, 10 * 1024 * 1024))
 
         before = time.monotonic()

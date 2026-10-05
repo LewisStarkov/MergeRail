@@ -403,6 +403,8 @@ def _safe_extract_workspace(
 
 
 def _prepare_owner(role: str, read_only: bool) -> None:
+    if sys.platform == "win32":
+        raise WorkerError("workspace preparation requires a POSIX container")
     if os.geteuid() != 65534:
         raise WorkerError("workspace preparation must run as the designated non-root UID")
     if role != "reviewer":
@@ -1065,6 +1067,8 @@ def _same_uid_processes(uid: int, own_pid: int) -> list[tuple[int, str]]:
 def _quiesce_same_uid() -> None:
     """Stop and terminate every untrusted peer before reading mutable tmpfs."""
 
+    if sys.platform == "win32":
+        raise WorkerError("artifact export requires a POSIX container")
     uid = os.geteuid()
     own_pid = os.getpid()
     deadline = time.monotonic() + 5

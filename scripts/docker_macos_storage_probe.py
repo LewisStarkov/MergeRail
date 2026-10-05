@@ -14,6 +14,7 @@ import platform
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -41,7 +42,7 @@ def attached(image: Path) -> list[dict[str, Any]]:
 
 
 def experiment() -> dict[str, Any]:
-    if platform.system() != "Darwin" or platform.machine() != "arm64":
+    if sys.platform != "darwin" or platform.machine() != "arm64":
         raise RuntimeError("this probe has only been prepared for macOS arm64")
     if os.environ.get("DOCKER_HOST"):
         raise RuntimeError("DOCKER_HOST override is unsupported")

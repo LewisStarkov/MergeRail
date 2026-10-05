@@ -12,6 +12,7 @@ import json
 import os
 import resource
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -98,6 +99,8 @@ def run(root: Path, tests: list[str], site: Path) -> dict[str, Any]:
               "tests": tests, "container": name, "cleanup_verified": False}
 
     def bound_cli_output() -> None:
+        if sys.platform == "win32":
+            raise RuntimeError("this probe requires a POSIX host")
         resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024, 10 * 1024 * 1024))
 
     try:

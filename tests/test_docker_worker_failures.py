@@ -251,6 +251,7 @@ def test_restore_home_skips_creation_for_idle_reviewer_but_restores_valid_sessio
     assert not (worker_paths.home / ".Opencode").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX user IDs are required")
 def test_prepare_owner_requires_designated_uid_before_changing_permissions(
     worker_paths: WorkerPaths, monkeypatch: pytest.MonkeyPatch
 ) -> None:
