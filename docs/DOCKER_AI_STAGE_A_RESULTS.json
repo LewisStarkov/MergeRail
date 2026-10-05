@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "release_ready": false,
+  "owner": "mergerail-ai-stage-a-cd91bb9b20e7",
+  "model": "opencode/space-bunny-free",
+  "credentials": "none",
+  "cleanup": {
+    "verified": true,
+    "errors": []
+  },
+  "client_stdout": "{\"type\":\"step_start\",\"timestamp\":1790585674796,\"sessionID\":\"ses_f18c6eb15ffegoZE6BKKFcUa37\",\"part\":{\"id\":\"prt_0e7391c28001lmBb57d6Z5z0BX\",\"messageID\":\"msg_0e7391578001XE8yI7Q1V6LD9F\",\"sessionID\":\"ses_f18c6eb15ffegoZE6BKKFcUa37\",\"type\":\"step-start\"}}\n{\"type\":\"text\",\"timestamp\":1790585674956,\"sessionID\":\"ses_f18c6eb15ffegoZE6BKKFcUa37\",\"part\":{\"id\":\"prt_0e7391c8a001lyo5R8iQpply7t\",\"messageID\":\"msg_0e7391578001XE8yI7Q1V6LD9F\",\"sessionID\":\"ses_f18c6eb15ffegoZE6BKKFcUa37\",\"type\":\"text\",\"text\":\"MERGERAIL_STAGE_A_OK\",\"time\":{\"start\":1790585674890,\"end\":1790585674946}}}\n{\"type\":\"step_finish\",\"timestamp\":1790585674957,\"sessionID\":\"ses_f18c6eb15ffegoZE6BKKFcUa37\",\"part\":{\"id\":\"prt_0e7391cc5001uIFMt1aWgEroQy\",\"reason\":\"stop\",\"messageID\":\"msg_0e7391578001XE8yI7Q1V6LD9F\",\"sessionID\":\"ses_f18c6eb15ffegoZE6BKKFcUa37\",\"type\":\"step-finish\",\"tokens\":{\"total\":2024,\"input\":66,\"output\":7,\"reasoning\":10,\"cache\":{\"write\":0,\"read\":1941}},\"cost\":0}}\n352391168\n",
+  "client_stderr": "",
+  "exit_code": 0,
+  "request_seconds": 3.832,
+  "authorized_response": true,
+  "gateway_logs": "docker_ai_gateway: pinned upstream opencode.ai to 172.65.90.22\ndocker_ai_gateway: listening on 172.20.0.2:8080 for 4 fixed routes\ndocker_ai_gateway: chat/completions 200 from 172.20.0.1\ndocker_ai_gateway: chat/completions 200 from 172.20.0.1\n",
+  "seconds": 8.103
+}

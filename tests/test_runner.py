@@ -703,3 +703,44 @@ def test_active_turn_can_be_cancelled_and_preserves_the_branch(
     assert cancelled.branch == "mergerail/1/a1"
     assert (runner.worktree.path / "partial.txt").exists()
     assert any(event["event"] == "task.cancelled" for event in runner.audit.read(task=task.id))
+
+
+def test_docker_delivery_cannot_fall_back_to_local_checks(
+    rig: tuple[Runner, FakeAgent, FakeAgent], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner, _, _ = rig
+    task = runner.store.add("saved Docker approval")
+    runner.store.update(task.id, execution={"backend": "docker", "policy_digest": "saved"})
+    runner.store.approve(
+        task.id, branch="candidate", commit="a" * 40, base_branch="main",
+        requested_mode="local", summary="fixed", review="approved",
+    )
+    events: list[str] = []
+
+    def baseline() -> list[Check]:
+        events.append("host baseline")
+        return []
+
+    monkeypatch.setattr(runner, "_baseline", baseline)
+    with pytest.raises(SystemExit, match="original execution policy"):
+        runner.run(once=True)
+    assert events == []
+    assert runner.store.get(task.id) is not None
+
+
+def test_cancelled_backend_exception_keeps_cancelled_status(
+    rig: tuple[Runner, FakeAgent, FakeAgent],
+) -> None:
+    runner, fixer, _ = rig
+    task = runner.store.add("cancel a running turn")
+
+    def cancel_then_raise(prompt: str) -> AgentReply:
+        runner.store.request_cancel(task.id)
+        raise RuntimeError("stage was killed")
+
+    fixer.turns = [cancel_then_raise]
+    claimed = runner.store.take_next()
+    assert claimed is not None
+    runner.handle(claimed)
+    result = runner.store.get(task.id)
+    assert result is not None and result.status == Status.CANCELLED

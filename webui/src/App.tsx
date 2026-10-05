@@ -309,6 +309,15 @@ function TaskWorkspace({task, onBack, refresh, notify, inputRef}: {
       <Fact label="Cost" value={task.cost_usd ? `$${task.cost_usd.toFixed(2)}` : "—"} />
     </div>
     <div class="workspace-scroll">
+      {task.execution?.backend === "docker" && <section class="record-section"><SectionHeading index="00" title="Docker execution" />
+        <div class="record-content">
+          <p>{task.execution.validated ? "Isolation validated" : "Isolation pending"}{task.execution.phase && ` · ${task.execution.phase}`}</p>
+          {task.execution.memory_mib && <p>RAM: {task.execution.memory_mib} MiB · Workspace: {task.execution.workspace_limit_mib} MiB</p>}
+          {task.execution.base_sha && <p>Base commit: <code>{task.execution.base_sha}</code></p>}
+          {task.execution.result_sha && <p>Saved result: <code>{task.execution.result_sha}</code></p>}
+          {task.execution.recovery?.status && <p>Recovery: {task.execution.recovery.status}</p>}
+        </div>
+      </section>}
       <section class="record-section description"><SectionHeading index="01" title="Request" />
         <div class="record-content"><p class="request-text">{task.text || "Attachment-only task"}</p>{task.file && <Attachment file={task.file} />}</div>
       </section>

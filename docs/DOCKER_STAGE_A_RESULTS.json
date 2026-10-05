@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "release_ready": false,
+  "host": "Darwin",
+  "architecture": "arm64",
+  "engine": "29.5.3",
+  "storage_driver": "overlayfs",
+  "engine_memory_bytes": 4108075008,
+  "engine_cpu_count": 12,
+  "image_id": "sha256:47f917f7409eacd22fc5dfb1dee634e1b55cf0c01d1a7eb701be2227a03e0641",
+  "image_digests": [
+    "postgres@sha256:47f917f7409eacd22fc5dfb1dee634e1b55cf0c01d1a7eb701be2227a03e0641"
+  ],
+  "owner": "mergerail-stage-a-4da1d12cbab1472ca99ff48f3136c865",
+  "probes": [
+    {
+      "name": "effective_kernel_limits",
+      "passed": true,
+      "seconds": 0.217,
+      "stdout": "CapEff:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t2",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "no_host_mount_or_active_external_interface",
+      "passed": true,
+      "seconds": 0.197,
+      "stdout": "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT                                                       \nerspan0 flags=0x1002\ngre0 flags=0x80\ngretap0 flags=0x1002\nip6_vti0 flags=0x80\nip6gre0 flags=0x80\nip6tnl0 flags=0x80\nip_vti0 flags=0x80\nsit0 flags=0x80\ntunl0 flags=0x80",
+      "stderr": "/bin/sh: 16: cannot create /tmp/escape: Directory nonexistent\ntouch: cannot touch '/etc/mergerail-stage-a-sentinel': Read-only file system",
+      "exit_code": 0
+    },
+    {
+      "name": "tmpfs_enospc_not_persistent_quota",
+      "passed": true,
+      "seconds": 0.198,
+      "stdout": "dd: error writing '/tmp/fill': No space left on device\n9+0 records in\n8+0 records out\n8388608 bytes (8.4 MB, 8.0 MiB) copied, 0.00428087 s, 2.0 GB/s\nwritten_bytes=8388608",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "cpu_throttled_under_load",
+      "passed": true,
+      "seconds": 3.214,
+      "stdout": "usage_usec 1544092\nuser_usec 1530340\nsystem_usec 13751\nnice_usec 0\nnr_periods 30\nnr_throttled 30\nthrottled_usec 4478741\nnr_bursts 0\nburst_usec 0\n5197824",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "name": "cancel_whole_container",
+      "passed": true,
+      "seconds": 1.097,
+      "processes_before_stop": "PID                 PPID                COMMAND\n25182               25159               sh\n25196               25182               sleep",
+      "state_after_stop": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 137,
+        "Error": "",
+        "StartedAt": "2026-09-28T08:09:25.4118243Z",
+        "FinishedAt": "2026-09-28T08:09:26.528370717Z"
+      }
+    }
+  ],
+  "unverified": [
+    "persistent workspace/cache hard quota and crash recovery",
+    "AI authorization and controlled egress",
+    "CLI -> tests -> reviewer sequence and immutable Git delivery",
+    "memory/PID stress enforcement and production eco budget",
+    "idle lifecycle of the production executor",
+    "cold pull, peak Docker VM RAM, native baseline and warm task overhead"
+  ],
+  "storage_opt_probe": {
+    "accepted": true,
+    "error": "",
+    "persistent_quota_verified": false
+  },
+  "local_volume_size_option": {
+    "accepted": false,
+    "error": "Error response from daemon: create mergerail-stage-a-4da1d12cbab1472ca99ff48f3136c865-quota: quota size requested but no quota support",
+    "persistent_quota_verified": false
+  },
+  "cleanup_verified": true
+}

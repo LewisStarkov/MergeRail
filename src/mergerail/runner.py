@@ -27,7 +27,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from . import checks, delivery, log, prompts
 from .audit import AuditLog
@@ -48,8 +48,11 @@ from .lease import RunnerBusy, RunnerLease
 from .setup import configured_copy
 from .share import Share
 from .streaming import normalize_agent_event
-from .supervisor import Supervisor
+from .supervisor import DockerSupervisor, Supervisor
 from .tasks import Status, Task, TaskMessage, TaskStore
+
+if TYPE_CHECKING:
+    from .execution.docker import DockerExecution, DockerWorktree
 
 
 class UpdateCandidate(Protocol):
@@ -93,15 +96,34 @@ class Runner:
                 raise SystemExit(f"mergerail: {start} is not inside a git repository")
             config = Config.load(repo_root(start))
         self.config = config
+        self.execution: DockerExecution | None = None
+        if config.execution is not None:
+            from .execution.docker import DockerExecution
+
+            if backends is not None:
+                raise ValueError("Docker execution refuses host backend overrides")
+            self.execution = DockerExecution(
+                config.execution, config.root, config.state_dir, config.external_backends
+            )
+            self.execution.preflight()
         self.store = TaskStore(self.config.queue_path)
         self.front = self._resolve_front(front)
-        self.supervisor = Supervisor(
-            self.config.process if supervise else [], self.config.root, self.config.process_log
+        command = self.config.process if supervise else []
+        self.supervisor: Supervisor | DockerSupervisor = (
+            DockerSupervisor(command, self.config.root, self.config.process_log, self.execution)
+            if self.execution is not None else
+            Supervisor(command, self.config.root, self.config.process_log)
         )
         self.share = share
         self.update_probe = update_probe
-        self.worktree = Worktree(self.config.root, self.config.worktree)
-        self.backends = backends or self.config.backend_registry()
+        self.worktree: Worktree | DockerWorktree = (
+            self.execution.worktree if self.execution is not None else
+            Worktree(self.config.root, self.config.worktree)
+        )
+        self.backends = (
+            self.execution.registry() if self.execution is not None else
+            backends or self.config.backend_registry()
+        )
         self.fixer_backend = ""
         self.reviewer_backend = ""
         try:
@@ -252,6 +274,10 @@ class Runner:
             return {
                 "initialized": (self.config.root / CONFIG_NAME).exists(),
                 "busy": self._active_task is not None,
+                "execution": (
+                    dict(self.execution.metadata) if self.execution is not None else
+                    {"backend": "local", "validated": False}
+                ),
                 "agents": {
                     name: {
                         "available": info.available,
@@ -368,8 +394,16 @@ class Runner:
                 reviewer=self.reviewer_backend,
                 run_id=run_id,
             )
+            if self.execution is None and any(
+                task.execution.get("backend") == "docker" for task in self.store.delivery_tasks()
+            ):
+                raise SystemExit(
+                    "mergerail: pending Docker delivery requires its original execution policy"
+                )
             self.front.start()
             try:
+                if self.execution is not None:
+                    self.execution.recover()
                 self._recover_agent_tasks()
                 self.active_checks = self._baseline()
                 if self.share is not None:
@@ -383,6 +417,8 @@ class Runner:
                 self.front.stop()
                 self.supervisor.stop()
                 self._close_agent_sessions()
+                if self.execution is not None:
+                    self.execution.close()
                 self.audit.emit("runner.stopped", run_id=run_id)
         finally:
             self.lease.release()
@@ -400,12 +436,17 @@ class Runner:
             return list(config.checks)
         log.info("checks.baseline", count=len(config.checks))
         branch = f"{config.branch_prefix}/baseline"
-        self.worktree.reset(branch, config.base_branch, recreate=True)
-        try:
-            healthy, failing = checks.baseline(config.checks, self.worktree.path)
-        finally:
-            self.worktree.detach(config.base_branch)
-            git("branch", "-D", branch, cwd=config.root, check=False)
+        if self.execution is not None:
+            healthy, failing = self.execution.baseline(
+                config.checks, git("rev-parse", config.base_branch, cwd=config.root)
+            )
+        else:
+            self.worktree.reset(branch, config.base_branch, recreate=True)
+            try:
+                healthy, failing = checks.baseline(config.checks, self.worktree.path)
+            finally:
+                self.worktree.detach(config.base_branch)
+                git("branch", "-D", branch, cwd=config.root, check=False)
         self.audit.emit(
             "checks.baseline",
             mode=config.baseline_mode,
@@ -501,6 +542,9 @@ class Runner:
                 with self._setup_lock:
                     self._active_task = None
                 self._close_agent_sessions()
+                if self.execution is not None and not self.supervisor.alive:
+                    self._execution_metadata(task.id)
+                    self.execution.close()
             if once or task.id == until:
                 return None
         return None
@@ -531,7 +575,11 @@ class Runner:
         self.audit.emit("task.started", task=task.id, branch=branch, attempt=task.attempts)
 
         base_sha = git("rev-parse", base, cwd=config.root)
+        if self.execution is not None:
+            self.supervisor.stop()
+            self.execution.set_task_id(task.id)
         self.worktree.reset(branch, base)
+        self._execution_metadata(task.id)
         fixer, reviewer = self._agents(task)
         current = self.store.update(task.id, branch=branch, note="", status=Status.RUNNING)
         self._stream(task, StreamEvent("runner", "status", "fixing"))
@@ -628,7 +676,7 @@ class Runner:
                 continue
 
             self._stream(task, StreamEvent("runner", "status", "running checks"))
-            passed, report = checks.run(
+            passed, report = self._run_checks(
                 self.active_checks,
                 self.worktree.path,
                 allowed_failures=self.allowed_check_failures,
@@ -751,6 +799,13 @@ class Runner:
                 except FutureTimeout:
                     if self._cancel_requested(task.id):
                         session.cancel()
+                except Exception:
+                    if self._cancel_requested(task.id):
+                        self._execution_metadata(task.id)
+                        self._cancel_task(task)
+                        return None
+                    raise
+        self._execution_metadata(task.id)
         if self._cancel_requested(task.id):
             self._cancel_task(task)
             return None
@@ -853,7 +908,12 @@ class Runner:
             return
         cancelled = self.store.complete_cancel(
             task.id,
-            f"cancelled; partial work is preserved on `{current.branch}`"
+            (
+                f"cancelled; last saved checkpoint is preserved on `{current.branch}`. "
+                "Changes after that checkpoint may be unsaved."
+                if self.execution is not None else
+                f"cancelled; partial work is preserved on `{current.branch}`"
+            )
             if current.branch
             else "cancelled",
         )
@@ -922,6 +982,8 @@ class Runner:
 
     def _change_context(self, base: str) -> tuple[str, str]:
         """The diff and its stat, for the review prompt to embed or point at."""
+        if self.execution is not None:
+            return self.execution.change_context(base)
         stat = git("diff", "--stat", f"{base}...HEAD", cwd=self.worktree.path, check=False)
         diff = git("diff", f"{base}...HEAD", cwd=self.worktree.path, check=False)
         return diff, stat
@@ -945,15 +1007,42 @@ class Runner:
             self.finish(task.id, Status.FAILED, "the approved delivery record is incomplete")
             return
         self.audit.emit("delivery.started", task=task.id, mode=resolved)
-        landed = delivery.recover_delivery(
-            self.config.root,
-            current,
-            summary,
-            review,
-            on_stage=lambda stage: self._record_delivery_stage(task.id, stage),
-            validate_merge=self._validate_merge,
-            integration_path=self.config.state_dir / "integration",
-        )
+        if self.execution is not None:
+            from .execution.delivery import recover_delivery
+
+            if (
+                current.execution.get("backend") != "docker"
+                or current.execution.get("policy_digest") != self.execution.policy.digest
+            ):
+                landed = delivery.Landing(
+                    False, "", "execution policy changed or the approval predates Docker; "
+                    "restore the original Docker settings or retry the task",
+                    stage="preflight",
+                )
+            else:
+                self.supervisor.stop()
+                self.execution.set_task_id(task.id)
+                landed = recover_delivery(
+                    self.execution, self.config.root, current,
+                    self.active_checks, self.allowed_check_failures,
+                    on_stage=lambda stage: self._record_delivery_stage(task.id, stage),
+                )
+                self._execution_metadata(task.id)
+        elif current.execution.get("backend") == "docker":
+            landed = delivery.Landing(
+                False, "", "Docker approval requires its original execution policy",
+                stage="preflight",
+            )
+        else:
+            landed = delivery.recover_delivery(
+                self.config.root,
+                current,
+                summary,
+                review,
+                on_stage=lambda stage: self._record_delivery_stage(task.id, stage),
+                validate_merge=self._validate_merge,
+                integration_path=self.config.state_dir / "integration",
+            )
         if not landed.ok:
             blocked = self.store.block_delivery(
                 task.id,
@@ -986,8 +1075,26 @@ class Runner:
         if landed.outcome == delivery.LOCAL_MERGE:
             # The branch is checked out here, so let go of it before deleting.
             self.worktree.detach(self.config.base_branch)
-            git("branch", "-d", branch, cwd=self.config.root, check=False)
+            if self.execution is not None:
+                from .execution.sync import host_git
+
+                candidate_branch = self.execution.metadata.get("candidate_branch")
+                cleanup = [branch]
+                if isinstance(candidate_branch, str) and candidate_branch.startswith(
+                    f"mergerail-candidate/{task.id}-"
+                ):
+                    cleanup.append(candidate_branch)
+                for name in cleanup:
+                    try:
+                        host_git(self.config.root, "branch", "-d", name, check=False)
+                    except RuntimeError as error:
+                        log.warn("docker.branch_cleanup_failed", branch=name, error=str(error))
+            else:
+                git("branch", "-d", branch, cwd=self.config.root, check=False)
             if self.supervisor.enabled:
+                if self.execution is not None:
+                    self._close_agent_sessions()
+                    self.execution.close()
                 log.info("runner.restarting_process")
                 self.supervisor.restart()
 
@@ -1015,13 +1122,50 @@ class Runner:
         self.audit.emit("delivery.stage", task=task_id, stage=stage)
 
     def _validate_merge(self, path: Path) -> tuple[bool, str]:
-        passed, report = checks.run(
+        passed, report = self._run_checks(
             self.active_checks,
             path,
             allowed_failures=self.allowed_check_failures,
         )
         self.audit.emit("delivery.integration_checks", passed=passed)
         return passed, report
+
+    def _run_checks(
+        self, selected: list[Check], path: Path, *,
+        allowed_failures: frozenset[str] = frozenset(),
+        cancelled: Callable[[], bool] | None = None,
+    ) -> tuple[bool, str]:
+        if self.execution is None:
+            return checks.run(
+                selected, path, allowed_failures=allowed_failures, cancelled=cancelled
+            )
+        sha = (self.worktree.head() if path == self.worktree.path else
+               git("rev-parse", "HEAD", cwd=path))
+        result = self.execution.run_checks(
+            selected, sha, allowed_failures=allowed_failures, cancelled=cancelled
+        )
+        if self._active_task is not None:
+            self._execution_metadata(self._active_task.id)
+        return result
+
+    def _execution_metadata(self, task_id: int) -> None:
+        if self.execution is not None:
+            policy = self.execution.policy
+            previous = self.store.get(task_id)
+            metadata = {
+                **(previous.execution if previous is not None else {}),
+                "version": 1,
+                **{
+                    key: value
+                    for key, value in self.execution.metadata.items()
+                    if value is not None
+                },
+                "backend": "docker", "policy_digest": policy.digest,
+                "memory_mib": policy.memory_mib, "cpus": policy.cpus,
+                "workspace_limit_mib": policy.workspace_limit_mib,
+            }
+            self.store.update(task_id, execution=metadata)
+            self.audit.emit("execution.state", task=task_id, **metadata)
 
     def commit_leftovers(self, task: Task) -> None:
         """Commit what the agent forgot to.

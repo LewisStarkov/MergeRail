@@ -36,11 +36,11 @@ def _text(path: Path) -> str:
         return ""
 
 
-def _python_prefix(root: Path) -> list[str]:
+def _python_prefix(root: Path, *, container: bool = False) -> list[str]:
     """How this project runs its own tools."""
-    if (root / "uv.lock").exists() and shutil.which("uv"):
+    if (root / "uv.lock").exists() and (container or shutil.which("uv")):
         return ["uv", "run"]
-    if (root / "poetry.lock").exists() and shutil.which("poetry"):
+    if (root / "poetry.lock").exists() and (container or shutil.which("poetry")):
         return ["poetry", "run"]
     return []
 
@@ -71,7 +71,7 @@ def _python_dependency_names(data: dict[str, Any]) -> set[str]:
     return {_requirement_name(str(item)) for item in listed if isinstance(item, str)}
 
 
-def _python_checks(root: Path) -> list[Check]:
+def _python_checks(root: Path, *, container: bool = False) -> list[Check]:
     """The tools this project actually depends on — not merely mentions.
 
     A substring scan of the manifest would propose ``ruff`` because a comment
@@ -87,7 +87,7 @@ def _python_checks(root: Path) -> list[Check]:
         data = {}
     names = _python_dependency_names(data)
     tables = data.get("tool") if isinstance(data.get("tool"), dict) else {}
-    prefix = _python_prefix(root)
+    prefix = _python_prefix(root, container=container)
     found: list[Check] = []
 
     def declared(tool: str, *files: str) -> bool:
@@ -104,19 +104,19 @@ def _python_checks(root: Path) -> list[Check]:
     return found
 
 
-def _node_manager(root: Path) -> str:
+def _node_manager(root: Path, *, container: bool = False) -> str:
     for lockfile, manager in (
         ("pnpm-lock.yaml", "pnpm"),
         ("yarn.lock", "yarn"),
         ("bun.lockb", "bun"),
         ("package-lock.json", "npm"),
     ):
-        if (root / lockfile).exists() and shutil.which(manager):
+        if (root / lockfile).exists() and (container or shutil.which(manager)):
             return manager
-    return "npm" if shutil.which("npm") else ""
+    return "npm" if container or shutil.which("npm") else ""
 
 
-def _node_checks(root: Path) -> list[Check]:
+def _node_checks(root: Path, *, container: bool = False) -> list[Check]:
     """Whatever the project already calls lint, typecheck and test.
 
     Only scripts that exist are proposed, and only the ones that end: a ``test``
@@ -133,7 +133,7 @@ def _node_checks(root: Path) -> list[Check]:
     scripts = manifest.get("scripts")
     if not isinstance(scripts, dict):
         return []
-    manager = _node_manager(root)
+    manager = _node_manager(root, container=container)
     if not manager:
         return []
     dependencies: set[str] = set()
@@ -156,8 +156,8 @@ def _node_checks(root: Path) -> list[Check]:
     return found
 
 
-def _rust_checks(root: Path) -> list[Check]:
-    if not (root / "Cargo.toml").exists() or not shutil.which("cargo"):
+def _rust_checks(root: Path, *, container: bool = False) -> list[Check]:
+    if not (root / "Cargo.toml").exists() or not (container or shutil.which("cargo")):
         return []
     return [
         Check("clippy", ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"]),
@@ -165,13 +165,13 @@ def _rust_checks(root: Path) -> list[Check]:
     ]
 
 
-def _go_checks(root: Path) -> list[Check]:
-    if not (root / "go.mod").exists() or not shutil.which("go"):
+def _go_checks(root: Path, *, container: bool = False) -> list[Check]:
+    if not (root / "go.mod").exists() or not (container or shutil.which("go")):
         return []
     return [Check("vet", ["go", "vet", "./..."]), Check("test", ["go", "test", "./..."])]
 
 
-def detect_checks(root: Path) -> list[Check]:
+def detect_checks(root: Path, *, container: bool = False) -> list[Check]:
     """Every check this repository already knows how to run.
 
     A polyglot repository gets all of them, which is right: a Next.js front and
@@ -179,7 +179,7 @@ def detect_checks(root: Path) -> list[Check]:
     """
     found: list[Check] = []
     for probe in (_python_checks, _node_checks, _rust_checks, _go_checks):
-        found.extend(probe(root))
+        found.extend(probe(root, container=container))
     return found
 
 

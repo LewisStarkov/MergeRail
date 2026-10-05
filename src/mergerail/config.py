@@ -16,7 +16,7 @@ import json
 import os
 import shlex
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from .backends import BackendRegistry, SessionSpec, default_registry
 from .backends.external import ExternalBackend
 from .delivery import AUTO
 from .detect import Check, convention_files, detect_checks
+from .execution.policy import ExecutionPolicy, load_policy
 from .gitctl import detect_base_branch
 
 CONFIG_NAME = "mergerail.toml"
@@ -93,6 +94,7 @@ class Config:
     reviewer: AgentConfig = field(default_factory=lambda: AgentConfig(permission="review"))
     external_backends: dict[str, list[str]] = field(default_factory=dict)
     project: ProjectContext = field(default_factory=ProjectContext)
+    execution: ExecutionPolicy | None = None
 
     @property
     def queue_path(self) -> Path:
@@ -144,6 +146,12 @@ class Config:
         return self.fronts.get(name, {})
 
     def backend_registry(self) -> BackendRegistry:
+        if self.execution is not None:
+            from .execution.docker import DockerExecution
+
+            return DockerExecution(
+                self.execution, self.root, self.state_dir, self.external_backends
+            ).registry()
         registry = default_registry()
         for name, command in self.external_backends.items():
             registry.register_external(ExternalBackend(name, command), replace=True)
@@ -152,8 +160,26 @@ class Config:
     # --- loading ---------------------------------------------------------
 
     @classmethod
-    def load(cls, root: Path) -> Config:
+    def load(cls, root: Path, *, docker_image: str = "") -> Config:
         raw = read_config_file(root / CONFIG_NAME)
+        if docker_image:
+            section = raw.get("execution", {})
+            if not isinstance(section, dict):
+                raise ValueError("execution must be a TOML table; host fallback is forbidden")
+            raw["execution"] = {**section, "image": docker_image}
+        try:
+            execution = load_policy(raw)
+        except ValueError as error:
+            sources = ["[execution] in mergerail.toml"] if "execution" in raw else []
+            sources += [
+                f"MERGERAIL_{name.upper()}"
+                for name in ("execution_backend", "execution_required", "execution_image")
+                if _env(name)
+            ]
+            raise ValueError(
+                f"unsupported execution configuration ({', '.join(sources)}): Docker: {error}. "
+                "MergeRail will not fall back to running on the host."
+            ) from error
         # The environment first, like everywhere else: it is the machine's own
         # answer, and the machine knows best where its state may live.
         state_dir = Path(
@@ -165,7 +191,9 @@ class Config:
         config = cls(
             root=root,
             base_branch=str(raw.get("base_branch") or "") or detect_base_branch(root),
-            checks=_checks_from(raw) or detect_checks(root),
+            checks=_checks_from(raw) or (
+                detect_checks(root, container=True) if execution else detect_checks(root)
+            ),
             conventions=convention_files(root),
             state_dir=state_dir,
             worktree=state_dir / "worktree",
@@ -173,8 +201,9 @@ class Config:
                 key: value
                 for key, value in raw.items()
                 if isinstance(value, dict)
-                and key not in {"agents", "backends", "checks", "project"}
+                and key not in {"agents", "backends", "checks", "project", "execution"}
             },
+            execution=execution,
         )
         _apply(config, raw)
         _apply_project(config, raw)
@@ -434,6 +463,14 @@ def render_config(config: Config) -> str:
         "",
         "# Detected from this repository. Order matters; the first failure stops the round.",
     ]
+    if config.execution is not None:
+        config.execution.validate()
+        index = lines.index("[project]")
+        execution_lines = ["[execution]"]
+        execution_lines += [
+            f"{key} = {json.dumps(value)}" for key, value in asdict(config.execution).items()
+        ]
+        lines[index:index] = [*execution_lines, ""]
     for check in config.checks:
         lines.append("[[checks]]")
         lines.append(f'name = "{check.name}"')

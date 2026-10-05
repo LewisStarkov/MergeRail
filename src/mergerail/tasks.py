@@ -34,10 +34,8 @@ from typing import Any
 
 from .filelock import exclusive_file
 
-#: Version 4 adds durable agent sessions and an execution history. Older
-#: versions remain readable and are backed up before their first version 4
-#: write.
-SCHEMA_VERSION = 4
+#: Version 5 adds the operator policy and immutable Docker execution metadata.
+SCHEMA_VERSION = 5
 
 
 class QueueCorruptError(RuntimeError):
@@ -237,15 +235,20 @@ class TaskRun:
     cost_usd: float = 0.0
     started_at: str = ""
     finished_at: str = ""
+    execution: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> TaskRun:
-        known = {item.name for item in fields(cls)} - {"delivery"}
+        known = {item.name for item in fields(cls)} - {"delivery", "execution"}
         data = {key: value for key, value in raw.items() if key in known}
         data["attempt"] = _safe_int(data.get("attempt", 0))
         data["status"] = str(data.get("status", ""))
         data["cost_usd"] = _safe_float(data.get("cost_usd", 0.0))
-        return cls(**data, delivery=DeliveryRecord.from_dict(raw.get("delivery")))
+        execution = raw.get("execution", {})
+        return cls(
+            **data, delivery=DeliveryRecord.from_dict(raw.get("delivery")),
+            execution=execution if isinstance(execution, dict) else {},
+        )
 
 
 @dataclass(slots=True)
@@ -288,6 +291,7 @@ class Task:
     sessions: dict[str, TaskSession] = field(default_factory=dict)
     #: Previous terminal executions, retained when the task is retried.
     runs: list[TaskRun] = field(default_factory=list)
+    execution: dict[str, Any] = field(default_factory=dict)
 
     @property
     def icon(self) -> str:
@@ -308,7 +312,7 @@ class Task:
     @classmethod
     def from_dict(cls, raw: dict[str, Any], *, schema_version: int = SCHEMA_VERSION) -> Task:
         """Tolerant on purpose: a file written by an older build still loads."""
-        known = {item.name for item in fields(cls)} - {"delivery", "sessions", "runs"}
+        known = {item.name for item in fields(cls)} - {"delivery", "sessions", "runs", "execution"}
         data = {key: value for key, value in raw.items() if key in known}
         data.setdefault("id", 0)
         data.setdefault("text", "")
@@ -337,7 +341,11 @@ class Task:
         )
         if schema_version < 2 and data.get("status") == Status.BLOCKED:
             data["legacy_blocked"] = True
-        return cls(**data, delivery=delivery, sessions=sessions, runs=runs)
+        execution = raw.get("execution", {})
+        return cls(
+            **data, delivery=delivery, sessions=sessions, runs=runs,
+            execution=execution if isinstance(execution, dict) else {},
+        )
 
 
 class TaskStore:
@@ -762,6 +770,7 @@ class TaskStore:
                     cost_usd=task.cost_usd,
                     started_at=task.claimed_at or task.created_at,
                     finished_at=task.updated_at or stamp,
+                    execution=dict(task.execution),
                 )
             )
             if task.branch and task.branch not in task.previous_branches:
@@ -769,6 +778,7 @@ class TaskStore:
             task.branch = None
             task.approved_sha = ""
             task.delivery = DeliveryRecord()
+            task.execution = {}
             task.legacy_blocked = False
             task.url = ""
             task.cost_usd = 0.0

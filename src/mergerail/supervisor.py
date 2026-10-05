@@ -18,8 +18,12 @@ import subprocess
 import threading
 from collections import deque
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import log, procs
+
+if TYPE_CHECKING:
+    from .execution.docker import DockerExecution
 
 #: Output lines worth keeping for an agent to read.
 ERROR_LINE = re.compile(r"\b(ERROR|CRITICAL|Traceback|Exception|FATAL)\b")
@@ -100,4 +104,77 @@ class Supervisor:
         return "\n".join(lines) if lines else ""
 
 
-__all__ = ["ERROR_LINE", "Supervisor"]
+class DockerSupervisor:
+    """An explicitly configured app runs offline and stops before a heavy stage."""
+
+    def __init__(
+        self, command: list[str], cwd: Path, log_path: Path, execution: DockerExecution
+    ) -> None:
+        self.command = command
+        self.cwd = cwd
+        self.log_path = log_path
+        self.execution = execution
+        self.recent_errors: deque[str] = deque(maxlen=40)
+        self._thread: threading.Thread | None = None
+        self._cancelled = threading.Event()
+        self._timer: threading.Timer | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.command)
+
+    @property
+    def alive(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self) -> None:
+        if not self.enabled or self.alive:
+            return
+        self._cancelled.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="mergerail-app")
+        self._thread.start()
+        self._timer = threading.Timer(
+            self.execution.policy.idle_stop_seconds, self._cancelled.set
+        )
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _run(self) -> None:
+        from .detect import Check
+        from .execution.sync import host_git
+
+        try:
+            sha = host_git(self.cwd, "rev-parse", "HEAD")
+            _, report = self.execution.run_checks(
+                [Check("app", self.command)], sha, cancelled=self._cancelled.is_set
+            )
+        except Exception as error:
+            report = str(error)
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.log_path.write_text(report[-self.execution.policy.log_limit_mib * 1024 * 1024:])
+        self.recent_errors.extend(report.splitlines()[-40:])
+
+    def stop(self, timeout: float = 30.0) -> None:
+        self._cancelled.set()
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        if self._thread is not None:
+            self._thread.join(timeout)
+            if self._thread.is_alive():
+                raise RuntimeError("Docker app did not stop; heavy stages remain blocked")
+            self._thread = None
+
+    def restart(self) -> None:
+        self.stop()
+        self.start()
+
+    def supervise(self) -> None:
+        # Idle-stop and successful exit are final until the next explicit restart.
+        pass
+
+    def error_digest(self, limit: int = 15) -> str:
+        return "\n".join(list(self.recent_errors)[-limit:])
+
+
+__all__ = ["ERROR_LINE", "DockerSupervisor", "Supervisor"]

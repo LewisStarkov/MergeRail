@@ -296,6 +296,12 @@ for filtering or machine-readable export. The hot task queue fails closed on
 malformed JSON and preserves a timestamped corrupt copy instead of overwriting
 it. `mergerail doctor` validates both the queue and runner lease location.
 
+Docker execution is available as an opt-in mode for a local Linux Docker engine
+or Docker Desktop on macOS. It runs agents, checks, review, and merge
+validation in bounded containers and stops if isolation cannot be validated.
+See [Docker setup and recovery](docs/DOCKER_EXECUTION.md) for pinned images,
+supported backends, and acceptance tests.
+
 ## Fronts and embedding
 
 Folder, Telegram and localhost Web fronts ship with the package. Web uses

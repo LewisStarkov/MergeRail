@@ -7,6 +7,7 @@ idempotent enough to recover after a process crash.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -276,6 +277,7 @@ def open_pull_request(
     *,
     commit: str = "",
     on_stage: StageSink | None = None,
+    sandboxed: bool = False,
 ) -> Landing:
     """Push the branch and open a PR with the reviewer's own words in it."""
     if not can_open_pr(root):
@@ -310,7 +312,12 @@ def open_pull_request(
     if on_stage:
         on_stage("push")
     pushed = subprocess.run(
-        ["git", "push", "--set-upstream", "origin", f"{target}:refs/heads/{branch}"],
+        [
+            "git",
+            *(["-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false"]
+              if sandboxed else []),
+            "push", "--set-upstream", "origin", f"{target}:refs/heads/{branch}",
+        ],
         cwd=root,
         capture_output=True,
         text=True,

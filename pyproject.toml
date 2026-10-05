@@ -1,6 +1,6 @@
 [project]
 name = "mergerail"
-version = "0.1.5"
+version = "0.1.6"
 description = "Queue coding tasks across agent CLIs, review the result, and deliver it safely."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,6 +36,7 @@ include = [
   "/LICENSE",
   "/README.md",
   "/docs",
+  "/docker",
   "/mergerail.toml",
   "/pyproject.toml",
   "/src",

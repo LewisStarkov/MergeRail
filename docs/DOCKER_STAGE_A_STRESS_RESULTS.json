@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "release_ready": false,
+  "host": "Darwin",
+  "architecture": "arm64",
+  "engine": "29.5.3",
+  "storage_driver": "overlayfs",
+  "engine_memory_bytes": 4108075008,
+  "engine_cpu_count": 12,
+  "image_id": "sha256:e2a5fce94bd761967528a12f16d707c2613e1522f3f2d77fa45766f45962547f",
+  "image_digests": [
+    "python@sha256:e2a5fce94bd761967528a12f16d707c2613e1522f3f2d77fa45766f45962547f"
+  ],
+  "owner": "mergerail-stage-a-959d0a84e0724e42a1a20f8ef17a5afd",
+  "probes": [
+    {
+      "name": "effective_kernel_limits",
+      "passed": true,
+      "seconds": 0.271,
+      "stdout": "CapEff:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t2",
+      "stderr": "",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "no_host_mount_or_active_external_interface",
+      "passed": true,
+      "seconds": 0.24,
+      "stdout": "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT                                                       \nerspan0 flags=0x1002\ngre0 flags=0x80\ngretap0 flags=0x1002\nip6_vti0 flags=0x80\nip6gre0 flags=0x80\nip6tnl0 flags=0x80\nip_vti0 flags=0x80\nsit0 flags=0x80\ntunl0 flags=0x80",
+      "stderr": "/bin/sh: 16: cannot create /tmp/escape: Directory nonexistent\ntouch: cannot touch '/etc/mergerail-stage-a-sentinel': Read-only file system",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "tmpfs_enospc_not_persistent_quota",
+      "passed": true,
+      "seconds": 0.236,
+      "stdout": "dd: error writing '/tmp/fill': No space left on device\n9+0 records in\n8+0 records out\n8388608 bytes (8.4 MB, 8.0 MiB) copied, 0.0212954 s, 394 MB/s\nwritten_bytes=8388608",
+      "stderr": "",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "cpu_throttled_under_load",
+      "passed": true,
+      "seconds": 3.31,
+      "stdout": "usage_usec 1551567\nuser_usec 1539775\nsystem_usec 11791\nnice_usec 0\nnr_periods 31\nnr_throttled 31\nthrottled_usec 4556043\nnr_bursts 0\nburst_usec 0\n7770112",
+      "stderr": "",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "memory_oom_enforced",
+      "passed": true,
+      "seconds": 0.334,
+      "stdout": "",
+      "stderr": "",
+      "exit_code": 137,
+      "oom_killed": true
+    },
+    {
+      "name": "pid_limit_enforced",
+      "passed": true,
+      "seconds": 0.282,
+      "stdout": "{\"errno\": 11, \"children\": 31, \"events\": \"max 1\\n\"}",
+      "stderr": "",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "cancel_whole_container",
+      "passed": true,
+      "seconds": 1.095,
+      "processes_before_stop": "PID                 PPID                COMMAND\n35441               35418               sh\n35454               35441               sleep",
+      "state_after_stop": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 137,
+        "Error": "",
+        "StartedAt": "2026-09-28T08:26:31.016653844Z",
+        "FinishedAt": "2026-09-28T08:26:32.130240178Z"
+      }
+    }
+  ],
+  "unverified": [
+    "persistent workspace/cache hard quota and crash recovery",
+    "AI authorization and controlled egress",
+    "CLI -> tests -> reviewer sequence and immutable Git delivery",
+    "idle lifecycle of the production executor",
+    "cold pull, peak Docker VM RAM, native baseline and warm task overhead",
+    "production eco budget (stress uses 64 MiB / 32 PIDs)"
+  ],
+  "storage_opt_probe": {
+    "accepted": true,
+    "error": "",
+    "persistent_quota_verified": false
+  },
+  "local_volume_size_option": {
+    "accepted": false,
+    "error": "Error response from daemon: create mergerail-stage-a-959d0a84e0724e42a1a20f8ef17a5afd-quota: quota size requested but no quota support",
+    "persistent_quota_verified": false
+  },
+  "cleanup_verified": true
+}

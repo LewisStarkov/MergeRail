@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "release_ready": false,
+  "owner": "mergerail-quota-d0d934b45a4d44a1",
+  "host": "macOS arm64",
+  "engine": "29.5.3",
+  "capacity_bytes": 67108864,
+  "image": "postgres@sha256:47f917f7409eacd22fc5dfb1dee634e1b55cf0c01d1a7eb701be2227a03e0641",
+  "probes": [
+    {
+      "seconds": 0.712,
+      "stdout": "dd: error writing 'fill': No space left on device\n62+0 records in\n61+0 records out\n64880640 bytes (65 MB, 62 MiB) copied, 0.305505 s, 212 MB/s\nwritten_bytes=64880640\n60264448\n",
+      "stderr": "",
+      "exit_code": 0,
+      "oom_killed": false
+    }
+  ],
+  "cleanup": {
+    "verified": false,
+    "errors": [
+      "hdiutil: couldn't unmount \"disk7\" - Resource busy"
+    ],
+    "retained_path": "/Users/lama/Library/Caches/mergerail-macos-storage-probe/probe-idvbjf95"
+  },
+  "image_allocated_bytes": 67108864,
+  "error": "hdiutil: couldn't unmount \"disk7\" - Resource busy",
+  "seconds": 3.555
+}

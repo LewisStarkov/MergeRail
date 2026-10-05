@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 from . import checks, log
@@ -13,14 +15,15 @@ from . import update as updater
 from .audit import AuditLog
 from .backends import BackendInfo, BackendRegistry
 from .backends.policy import strict_security_gaps
-from .config import CONFIG_NAME, Config, ensure_state_ignored, write_config
+from .config import CONFIG_NAME, Config, ensure_state_ignored, read_config_file, write_config
 from .delivery import LOCAL, can_open_pr, resolve_mode
+from .execution.policy import load_policy
 from .fronts.base import Front
 from .fronts.web import LOCAL_HOSTS, WebFront
 from .gitctl import current_branch, has_commits, is_repo, repo_root
 from .runner import Runner
 from .share import NgrokTunnel, Share
-from .tasks import QueueCorruptError, Status, TaskStore
+from .tasks import QueueCorruptError, Status, TaskStore, write_atomic
 
 USAGE = """\
   mergerail                     work the queue, tasks arrive as files in .mergerail/inbox
@@ -67,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--path", default=".", help="repository to work in")
     common.add_argument("--log-level", default="INFO")
+    common.add_argument(
+        "--docker-image", default="", help="require Docker using an installed sha256-pinned image"
+    )
 
     parser = argparse.ArgumentParser(
         prog="mergerail",
@@ -201,7 +207,7 @@ def resolve(args: argparse.Namespace) -> Config:
     if not is_repo(start):
         raise SystemExit(f"mergerail: {start} is not a git repository")
     try:
-        config = Config.load(repo_root(start))
+        config = Config.load(repo_root(start), docker_image=getattr(args, "docker_image", ""))
     except ValueError as error:
         raise SystemExit(f"mergerail: invalid {CONFIG_NAME}: {error}") from error
     if getattr(args, "delivery", ""):
@@ -247,7 +253,20 @@ def doctor(config: Config, *, run_checks: bool = False) -> int:
         queue_detail = str(exc)
         queue_healthy = False
     checked_out = current_branch(config.root) or "(detached)"
-    registry = config.backend_registry()
+    runtime = None
+    if config.execution is not None:
+        from .execution.docker import DockerExecution
+
+        runtime = DockerExecution(
+            config.execution, config.root, config.state_dir, config.external_backends
+        )
+        try:
+            diagnostics = runtime.preflight()
+        except RuntimeError as error:
+            print(f"Docker preflight failed: {error}; host fallback is forbidden")
+            return 1
+        print("Docker execution: " + json.dumps(diagnostics, sort_keys=True))
+    registry = runtime.registry() if runtime is not None else config.backend_registry()
     probed = registry.probe()
     assert isinstance(probed, dict)
     selected, backend_errors = _selected_backends(config, registry)
@@ -299,14 +318,21 @@ def doctor(config: Config, *, run_checks: bool = False) -> int:
     print("\n".join(lines))
     healthy = queue_healthy
     if run_checks and config.checks:
-        print("\nrunning the checks here, as a baseline:")
-        healthy, report = checks.run(config.checks, config.root)
+        print("\nrunning baseline checks:")
+        if runtime is not None:
+            from .execution.sync import host_git
+
+            healthy, report = runtime.run_checks(
+                config.checks, host_git(config.root, "rev-parse", config.base_branch)
+            )
+        else:
+            healthy, report = checks.run(config.checks, config.root)
         print(report)
         if not healthy:
             print("\na check that fails on the base would fail every task — fix it first.")
     if backend_errors:
-        for error in backend_errors:
-            log.error("mergerail.backend_unavailable", reason=error)
+        for reason in backend_errors:
+            log.error("mergerail.backend_unavailable", reason=reason)
     return 0 if not backend_errors and has_commits(config.root) and healthy else 1
 
 
@@ -353,9 +379,27 @@ def _strict_security_errors(
 
 
 def init(config: Config, *, interactive: bool = False) -> int:
+    if config.execution is not None:
+        from .execution.docker import DockerExecution
+
+        try:
+            DockerExecution(
+                config.execution, config.root, config.state_dir, config.external_backends
+            ).preflight()
+        except (RuntimeError, ValueError) as error:
+            print(f"mergerail: Docker preflight failed: {error}")
+            return 1
     target = config.root / CONFIG_NAME
     if target.exists():
-        print(f"mergerail: {target} already exists — leaving it alone")
+        if config.execution is not None and "execution" not in read_config_file(target):
+            section = "\n\n[execution]\n" + "\n".join(
+                f"{key} = {json.dumps(value)}"
+                for key, value in asdict(config.execution).items()
+            ) + "\n"
+            write_atomic(target, target.read_text(encoding="utf-8") + section)
+            print(f"mergerail: enabled mandatory Docker execution in {target}")
+        else:
+            print(f"mergerail: {target} already exists — leaving it alone")
     else:
         if interactive:
             _init_wizard(config)
@@ -580,6 +624,34 @@ def preflight(config: Config) -> bool:
     return True
 
 
+def _execution_requested(args: argparse.Namespace) -> bool:
+    if getattr(args, "docker_image", ""):
+        return True
+    start = Path(args.path).expanduser().resolve()
+    raw: dict[str, object] = {}
+    for directory in (start, *start.parents):
+        if (directory / CONFIG_NAME).exists():
+            raw = read_config_file(directory / CONFIG_NAME)
+            break
+        if (directory / ".git").exists():
+            break
+    if "execution" in raw or any(
+        os.environ.get(name, "").strip()
+        for name in (
+            "MERGERAIL_EXECUTION_BACKEND", "MERGERAIL_EXECUTION_REQUIRED",
+            "MERGERAIL_EXECUTION_IMAGE",
+        )
+    ):
+        try:
+            load_policy(raw)
+        except ValueError as error:
+            raise SystemExit(
+                f"mergerail: invalid Docker execution: {error}; host fallback is forbidden"
+            ) from error
+        return True
+    return False
+
+
 def _share(args: argparse.Namespace, config: Config, front: str) -> Share | None:
     requested = getattr(args, "share", None)
     policy_arg = getattr(args, "share_policy", "")
@@ -634,10 +706,12 @@ def main(argv: list[str] | None = None) -> int:
     log.setup(args.log_level)
     if args.command == "update":
         return updater.update(check_only=args.check)
+    docker_requested = _execution_requested(args)
     if (
         argv is None
         and args.command in {"run", "once"}
         and not args.no_update
+        and not docker_requested
         and updater.auto_update()
     ):
         try:
@@ -693,7 +767,7 @@ def main(argv: list[str] | None = None) -> int:
             share=share,
             allow_setup=allows_setup,
         )
-        if _runtime_updates_enabled(args, argv, current.front):
+        if config.execution is None and _runtime_updates_enabled(args, argv, current.front):
             current.update_probe = updater.runtime_candidate
         return current
 

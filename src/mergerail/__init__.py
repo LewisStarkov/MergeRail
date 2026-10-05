@@ -24,7 +24,7 @@ from .runner import Runner
 from .supervisor import Supervisor
 from .tasks import Status, Task, TaskStore
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 __all__ = [
     "AgentOptions",

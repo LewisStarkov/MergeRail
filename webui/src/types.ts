@@ -44,6 +44,17 @@ export interface Task {
   message_revision?: number;
   last_message_at?: string;
   delivery?: Delivery;
+  execution?: {
+    backend?: string;
+    validated?: boolean;
+    phase?: string;
+    base_sha?: string;
+    result_sha?: string;
+    image?: string;
+    recovery?: {status?: string; pending_artifacts?: string[]};
+    memory_mib?: number;
+    workspace_limit_mib?: number;
+  };
   live?: LiveTrace | null;
 }
 

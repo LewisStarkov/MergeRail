@@ -1,0 +1,712 @@
+{
+  "schema": 1,
+  "probe": "docker_network_stage_a",
+  "release_ready": false,
+  "requested_image": "python@sha256:e2a5fce94bd761967528a12f16d707c2613e1522f3f2d77fa45766f45962547f",
+  "owner": "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b",
+  "network_name": "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-net",
+  "checks": [
+    {
+      "name": "network_isolated_and_unlabeled_gateway",
+      "passed": true,
+      "details": {
+        "internal": true,
+        "enable_ipv6": false,
+        "options": {
+          "com.docker.network.bridge.enable_ipv6": "false",
+          "com.docker.network.bridge.gateway_mode_ipv4": "isolated",
+          "com.docker.network.enable_ipv4": "true"
+        },
+        "labels": {
+          "io.mergerail.network-stage-a": "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b"
+        },
+        "subnets": [
+          {
+            "Subnet": "172.20.0.0/16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "fixture_serves_exact_fixed_response",
+      "passed": true,
+      "details": {
+        "address": "172.20.0.1",
+        "port": 8080,
+        "attempts": 1,
+        "received_bytes": 121,
+        "received_sha256": "a21d093e692f8ddb451530385d831239620dfefd6dd1587de7c6f6991bef4fab",
+        "expected_bytes": 121,
+        "expected_sha256": "a21d093e692f8ddb451530385d831239620dfefd6dd1587de7c6f6991bef4fab",
+        "served": 1
+      }
+    },
+    {
+      "name": "client_has_no_ipv4_default_route",
+      "passed": true,
+      "details": {
+        "routes": [
+          [
+            "eth0",
+            "000014AC",
+            "00000000",
+            "0001",
+            "0",
+            "0",
+            "0",
+            "0000FFFF",
+            "0",
+            "0",
+            "0"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "public_endpoint_blocked",
+      "passed": true,
+      "details": {
+        "target": "1.1.1.1",
+        "port": 443,
+        "resolved": "1.1.1.1",
+        "resolution_error": null,
+        "connected": false,
+        "error": "OSError: [Errno 101] Network is unreachable",
+        "received": null,
+        "seconds": 0.0,
+        "address": "1.1.1.1",
+        "blocked": true,
+        "blocked_by": "connect_failed"
+      }
+    },
+    {
+      "name": "cloud_metadata_blocked",
+      "passed": true,
+      "details": {
+        "target": "169.254.169.254",
+        "port": 80,
+        "resolved": "169.254.169.254",
+        "resolution_error": null,
+        "connected": false,
+        "error": "OSError: [Errno 101] Network is unreachable",
+        "received": null,
+        "seconds": 0.0,
+        "address": "169.254.169.254",
+        "blocked": true,
+        "blocked_by": "connect_failed"
+      }
+    },
+    {
+      "name": "host_sentinel_unreachable",
+      "passed": true,
+      "details": {
+        "client": {
+          "target": "host.docker.internal",
+          "port": 61052,
+          "resolved": "192.168.65.254",
+          "resolution_error": null,
+          "connected": false,
+          "error": "OSError: [Errno 101] Network is unreachable",
+          "received": null,
+          "seconds": 0.0,
+          "address": "192.168.65.254",
+          "blocked": true,
+          "blocked_by": "connect_failed"
+        },
+        "host_sentinel_accepted": 0
+      }
+    },
+    {
+      "name": "external_dns_blocked",
+      "passed": true,
+      "details": {
+        "name": "opencode.ai",
+        "resolved": null,
+        "error": "gaierror: [Errno -3] Temporary failure in name resolution",
+        "timed_out": false,
+        "seconds": 0.001,
+        "blocked": true,
+        "blocked_by": "name_unresolved"
+      }
+    },
+    {
+      "name": "containers_hardened",
+      "passed": true,
+      "details": {
+        "client": {
+          "Uid": [
+            "65534",
+            "65534",
+            "65534",
+            "65534"
+          ],
+          "CapEff": [
+            "0000000000000000"
+          ],
+          "NoNewPrivs": [
+            "1"
+          ],
+          "Seccomp": [
+            "2"
+          ]
+        },
+        "fixture": {
+          "Uid": [
+            "65534",
+            "65534",
+            "65534",
+            "65534"
+          ],
+          "CapEff": [
+            "0000000000000000"
+          ],
+          "NoNewPrivs": [
+            "1"
+          ],
+          "Seccomp": [
+            "2"
+          ]
+        }
+      }
+    },
+    {
+      "name": "fixture_network_has_no_default_route",
+      "passed": true,
+      "details": {
+        "default_route": false,
+        "served": 1,
+        "failures": 0,
+        "accept_error": null
+      }
+    },
+    {
+      "name": "no_published_ports_and_single_network",
+      "passed": true,
+      "details": {
+        "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-fixture": {
+          "network_mode": "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-net",
+          "port_bindings": {},
+          "published": {},
+          "networks": {
+            "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-net": {
+              "ip_address": "",
+              "gateway": ""
+            }
+          }
+        },
+        "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-client": {
+          "network_mode": "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-net",
+          "port_bindings": {},
+          "published": {},
+          "networks": {
+            "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-net": {
+              "ip_address": "",
+              "gateway": ""
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "resource_bounds_recorded_by_engine",
+      "passed": true,
+      "details": {
+        "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-fixture": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "local",
+            "Config": {
+              "compress": "false",
+              "max-file": "1",
+              "max-size": "1m"
+            }
+          },
+          "NetworkMode": "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-net",
+          "PortBindings": {},
+          "RestartPolicy": {
+            "Name": "no",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [
+            0,
+            0
+          ],
+          "CapAdd": null,
+          "CapDrop": [
+            "ALL"
+          ],
+          "CgroupnsMode": "private",
+          "Dns": [
+            "127.0.0.1"
+          ],
+          "DnsOptions": [
+            "timeout:1",
+            "attempts:1"
+          ],
+          "DnsSearch": [],
+          "ExtraHosts": null,
+          "GroupAdd": null,
+          "IpcMode": "private",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": true,
+          "SecurityOpt": [
+            "no-new-privileges:true"
+          ],
+          "Tmpfs": {
+            "/tmp": "rw,noexec,nosuid,nodev,size=8m,mode=1777"
+          },
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 1048576,
+          "Runtime": "runc",
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 67108864,
+          "NanoCpus": 500000000,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": [],
+          "BlkioDeviceReadBps": [],
+          "BlkioDeviceWriteBps": [],
+          "BlkioDeviceReadIOps": [],
+          "BlkioDeviceWriteIOps": [],
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": [],
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 67108864,
+          "MemorySwappiness": null,
+          "OomKillDisable": null,
+          "PidsLimit": 32,
+          "Ulimits": [],
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": [
+            "/proc/acpi",
+            "/proc/asound",
+            "/proc/interrupts",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/sched_debug",
+            "/proc/scsi",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/sys/devices/virtual/powercap",
+            "/sys/firmware"
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ]
+        },
+        "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-client": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "local",
+            "Config": {
+              "compress": "false",
+              "max-file": "1",
+              "max-size": "1m"
+            }
+          },
+          "NetworkMode": "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-net",
+          "PortBindings": {},
+          "RestartPolicy": {
+            "Name": "no",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [
+            0,
+            0
+          ],
+          "CapAdd": null,
+          "CapDrop": [
+            "ALL"
+          ],
+          "CgroupnsMode": "private",
+          "Dns": [
+            "127.0.0.1"
+          ],
+          "DnsOptions": [
+            "timeout:1",
+            "attempts:1"
+          ],
+          "DnsSearch": [],
+          "ExtraHosts": [
+            "host.docker.internal:host-gateway"
+          ],
+          "GroupAdd": null,
+          "IpcMode": "private",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": true,
+          "SecurityOpt": [
+            "no-new-privileges:true"
+          ],
+          "Tmpfs": {
+            "/tmp": "rw,noexec,nosuid,nodev,size=8m,mode=1777"
+          },
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 1048576,
+          "Runtime": "runc",
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 67108864,
+          "NanoCpus": 500000000,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": [],
+          "BlkioDeviceReadBps": [],
+          "BlkioDeviceWriteBps": [],
+          "BlkioDeviceReadIOps": [],
+          "BlkioDeviceWriteIOps": [],
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": [],
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 67108864,
+          "MemorySwappiness": null,
+          "OomKillDisable": null,
+          "PidsLimit": 32,
+          "Ulimits": [],
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": [
+            "/proc/acpi",
+            "/proc/asound",
+            "/proc/interrupts",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/sched_debug",
+            "/proc/scsi",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/sys/devices/virtual/powercap",
+            "/sys/firmware"
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ]
+        }
+      }
+    },
+    {
+      "name": "client_dns_pinned_and_sentinel_pinned",
+      "passed": true,
+      "details": {
+        "dns": [
+          "127.0.0.1"
+        ],
+        "dns_options": [
+          "timeout:1",
+          "attempts:1"
+        ],
+        "extra_hosts": [
+          "host.docker.internal:host-gateway"
+        ],
+        "nameservers": [
+          "#",
+          "Generated",
+          "by",
+          "Docker",
+          "Engine.",
+          "#",
+          "This",
+          "file",
+          "can",
+          "be",
+          "edited;",
+          "Docker",
+          "Engine",
+          "will",
+          "not",
+          "make",
+          "further",
+          "changes",
+          "once",
+          "it",
+          "#",
+          "has",
+          "been",
+          "modified.",
+          "nameserver",
+          "127.0.0.11",
+          "options",
+          "timeout:1",
+          "attempts:1",
+          "ndots:0",
+          "#",
+          "Based",
+          "on",
+          "host",
+          "file:",
+          "'/etc/resolv.conf'",
+          "(internal",
+          "resolver)",
+          "#",
+          "ExtServers:",
+          "[127.0.0.1]",
+          "#",
+          "Overrides:",
+          "[nameservers",
+          "options]",
+          "#",
+          "Option",
+          "ndots",
+          "from:",
+          "internal"
+        ]
+      }
+    }
+  ],
+  "phases": {
+    "preflight_seconds": 0.959,
+    "network_create_seconds": 0.044,
+    "fixture_start_seconds": 0.436,
+    "client_seconds": 0.284,
+    "fixture_stop_seconds": 0.524,
+    "cleanup_seconds": 0.414
+  },
+  "cleanup": {
+    "containers": [
+      "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-preflight",
+      "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-fixture",
+      "mergerail-network-stage-a-0ec4c443764442ae93d1137a3d6eb74b-client"
+    ],
+    "network_removed": true,
+    "verified": true,
+    "errors": []
+  },
+  "unverified": [
+    "controlled AI egress gateway, redirect checks and provider authorization",
+    "loopback-only publication of preview ports",
+    "remote Docker contexts, several engines and parallel heavy stages",
+    "Linux and Windows/WSL hosts, amd64 images and CPU/RAM/PID stress enforcement",
+    "project CLI -> tests -> reviewer sequence and Git bundle delivery",
+    "execution/docker.py implementation; protected mode is not started"
+  ],
+  "host": "Darwin",
+  "architecture": "arm64",
+  "engine": "29.5.3",
+  "context": "desktop-linux",
+  "endpoint": "unix:///Users/lama/.docker/run/docker.sock",
+  "storage_driver": "overlayfs",
+  "image": {
+    "reference": "python@sha256:e2a5fce94bd761967528a12f16d707c2613e1522f3f2d77fa45766f45962547f",
+    "id": "sha256:e2a5fce94bd761967528a12f16d707c2613e1522f3f2d77fa45766f45962547f",
+    "repo_digests": [
+      "python@sha256:e2a5fce94bd761967528a12f16d707c2613e1522f3f2d77fa45766f45962547f"
+    ],
+    "os": "linux",
+    "architecture": "arm64"
+  },
+  "sentinel": {
+    "bind": "0.0.0.0",
+    "port": 61052,
+    "reachable": true,
+    "error": null,
+    "closed": true
+  },
+  "interpreter": {
+    "path": "/usr/local/bin/python3",
+    "output": "{\"host_address\": \"192.168.65.254\"}",
+    "stderr": ""
+  },
+  "host_gateway_positive_control": {
+    "host_address": "192.168.65.254"
+  },
+  "client": {
+    "process": {
+      "Uid": [
+        "65534",
+        "65534",
+        "65534",
+        "65534"
+      ],
+      "CapEff": [
+        "0000000000000000"
+      ],
+      "NoNewPrivs": [
+        "1"
+      ],
+      "Seccomp": [
+        "2"
+      ]
+    },
+    "routes": [
+      [
+        "eth0",
+        "000014AC",
+        "00000000",
+        "0001",
+        "0",
+        "0",
+        "0",
+        "0000FFFF",
+        "0",
+        "0",
+        "0"
+      ]
+    ],
+    "ipv4_default_route": false,
+    "fixture": {
+      "attempts": [
+        {
+          "attempt": 1,
+          "resolved": "172.20.0.1",
+          "resolution_error": null,
+          "connected": true,
+          "error": null,
+          "received": "SFRUUC8xLjAgMjAwIE9LDQpDb250ZW50LVR5cGU6IHRleHQvcGxhaW4NCkNvbnRlbnQtTGVuZ3RoOiAzNw0KQ29ubmVjdGlvbjogY2xvc2UNCg0KTUVSR0VSQUlMX1NUQUdFX0FfTkVUV09SS19GSVhUVVJFX09LCg==",
+          "seconds": 0.0
+        }
+      ],
+      "address": "172.20.0.1",
+      "port": 8080
+    },
+    "public": {
+      "target": "1.1.1.1",
+      "port": 443,
+      "resolved": "1.1.1.1",
+      "resolution_error": null,
+      "connected": false,
+      "error": "OSError: [Errno 101] Network is unreachable",
+      "received": null,
+      "seconds": 0.0,
+      "address": "1.1.1.1",
+      "blocked": true,
+      "blocked_by": "connect_failed"
+    },
+    "metadata": {
+      "target": "169.254.169.254",
+      "port": 80,
+      "resolved": "169.254.169.254",
+      "resolution_error": null,
+      "connected": false,
+      "error": "OSError: [Errno 101] Network is unreachable",
+      "received": null,
+      "seconds": 0.0,
+      "address": "169.254.169.254",
+      "blocked": true,
+      "blocked_by": "connect_failed"
+    },
+    "sentinel": {
+      "target": "host.docker.internal",
+      "port": 61052,
+      "resolved": "192.168.65.254",
+      "resolution_error": null,
+      "connected": false,
+      "error": "OSError: [Errno 101] Network is unreachable",
+      "received": null,
+      "seconds": 0.0,
+      "address": "192.168.65.254",
+      "blocked": true,
+      "blocked_by": "connect_failed"
+    },
+    "external_dns": {
+      "name": "opencode.ai",
+      "resolved": null,
+      "error": "gaierror: [Errno -3] Temporary failure in name resolution",
+      "timed_out": false,
+      "seconds": 0.001,
+      "blocked": true,
+      "blocked_by": "name_unresolved"
+    },
+    "nameservers": [
+      "#",
+      "Generated",
+      "by",
+      "Docker",
+      "Engine.",
+      "#",
+      "This",
+      "file",
+      "can",
+      "be",
+      "edited;",
+      "Docker",
+      "Engine",
+      "will",
+      "not",
+      "make",
+      "further",
+      "changes",
+      "once",
+      "it",
+      "#",
+      "has",
+      "been",
+      "modified.",
+      "nameserver",
+      "127.0.0.11",
+      "options",
+      "timeout:1",
+      "attempts:1",
+      "ndots:0",
+      "#",
+      "Based",
+      "on",
+      "host",
+      "file:",
+      "'/etc/resolv.conf'",
+      "(internal",
+      "resolver)",
+      "#",
+      "ExtServers:",
+      "[127.0.0.1]",
+      "#",
+      "Overrides:",
+      "[nameservers",
+      "options]",
+      "#",
+      "Option",
+      "ndots",
+      "from:",
+      "internal"
+    ]
+  },
+  "elapsed_seconds": 2.716
+}

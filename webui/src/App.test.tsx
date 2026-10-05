@@ -55,6 +55,24 @@ afterEach(() => {
 });
 
 describe("App integration contracts", () => {
+  it("renders Docker recovery metadata from the task API", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === "/api/tasks") return Promise.resolve(response({
+        tasks: [{...task, execution: {
+          backend: "docker", validated: true, phase: "reconciled",
+          base_sha: "a".repeat(40), result_sha: "b".repeat(40),
+          recovery: {status: "unverified-artifacts-preserved", pending_artifacts: ["checkpoint.tar"]},
+        }}], setup: {},
+      }));
+      return Promise.resolve(response({messages: [], message_count: 0}));
+    }));
+
+    render(<App />);
+    await screen.findByText("Recovery: unverified-artifacts-preserved");
+    expect(screen.getByText("Isolation validated · reconciled")).toBeTruthy();
+    expect(screen.getByText("b".repeat(40))).toBeTruthy();
+  });
+
   it("reloads when replacement SSE arrives after the initial REST request fails", async () => {
     const reload = vi.fn();
     setPageRuntime("original");
