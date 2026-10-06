@@ -17,7 +17,9 @@ from mergerail.tasks import DeliveryRecord, Status, Task, TaskStore
 from tests.conftest import run
 
 
-def publication(repo: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[DevBotWebFront, Task, Path]:
+def publication(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, backend: str = "opencode"
+) -> tuple[DevBotWebFront, Task, Path]:
     base = run("rev-parse", "HEAD", cwd=repo)
     (repo / "bot").mkdir()
     (repo / "bot/value.py").write_text("value = 2\n")
@@ -38,8 +40,8 @@ def publication(repo: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[DevBotWebF
         worktree=repo / ".mergerail/worktree",
         delivery="local",
         baseline_mode="strict",
-        fixer=AgentConfig(backend="opencode"),
-        reviewer=AgentConfig(backend="opencode"),
+        fixer=AgentConfig(backend=backend),
+        reviewer=AgentConfig(backend=backend),
         execution=ExecutionPolicy(image="sha256:" + "a" * 64, release_scope="rivals-dev"),
     )
     store = TaskStore(config.queue_path)
@@ -63,6 +65,11 @@ def publication(repo: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[DevBotWebF
     front = DevBotWebFront(store, config)
     front.publish(saved)
     return front, saved, outbox / front.key(saved)
+
+
+def test_codex_task_publishes_the_reviewed_sha(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, task, directory = publication(repo, monkeypatch, backend="codex")
+    assert read_record(directory / "request.json")["sha"] == task.approved_sha
 
 
 def deployer(repo: Path, outbox: Path, monkeypatch: pytest.MonkeyPatch) -> DevBotDeployer:

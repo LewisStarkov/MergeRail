@@ -1,6 +1,5 @@
 """Build operator-owned images and seed a dedicated Engine from checked Git objects."""
 
-import json
 import os
 import secrets
 import shutil
@@ -36,7 +35,14 @@ if previous.exists():
         )
 
 os.umask(0o077)
-for name in ("secrets", "outbox", "deployer", "build/controller", "build/worker"):
+for name in (
+    "secrets",
+    "secrets/codex-gateway",
+    "outbox",
+    "deployer",
+    "build/controller",
+    "build/worker",
+):
     (RUNTIME / name).mkdir(parents=True, exist_ok=True, mode=0o700)
 sha = run("git", "-C", str(RIVALS), "rev-parse", "main")
 if run("git", "-C", str(RIVALS), "branch", "--show-current") != "main":
@@ -50,22 +56,6 @@ shutil.copytree(
     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
 )
 shutil.copyfile(SOURCE / "ops/devbot/controller.Dockerfile", controller / "Dockerfile")
-# This is model metadata, never OpenCode credentials or the user's home directory.
-catalogue = json.loads((Path.home() / ".cache/opencode/models.json").read_text())
-model = catalogue["opencode"]["models"]["space-bunny-free"]
-if any(model["cost"][key] != 0 for key in ("input", "output")):
-    raise SystemExit("The selected OpenCode model is no longer free")
-(controller / "models.json").write_text(
-    json.dumps(
-        {
-            "opencode": {
-                "models": {
-                    "space-bunny-free": model,
-                }
-            }
-        }
-    )
-)
 for name in (
     "pyproject.toml",
     "uv.lock",

@@ -15,11 +15,18 @@ services:
       MERGERAIL_EXECUTION_BACKEND: docker
       MERGERAIL_EXECUTION_REQUIRED: 'true'
       MERGERAIL_EXECUTION_IMAGE: ${MERGERAIL_WORKER_IMAGE:?pin the worker image ID}
+      MERGERAIL_FIXER_BACKEND: codex
+      MERGERAIL_FIXER_MODEL: gpt-6.1-sol
+      MERGERAIL_FIXER_EFFORT: high
+      MERGERAIL_REVIEWER_BACKEND: codex
+      MERGERAIL_REVIEWER_MODEL: gpt-6.1-sol
+      MERGERAIL_REVIEWER_EFFORT: high
       MERGERAIL_STATE_DIR: /state
       MERGERAIL_DEVBOT_OUTBOX: /outbox
       MERGERAIL_WEB_PASSWORD_FILE: /run/secrets/web-password
       MERGERAIL_NGROK_CONFIG: /run/secrets/ngrok.yml
       MERGERAIL_NGROK_LOG_DIR: /tmp
+      MERGERAIL_CODEX_GATEWAY_CREDENTIALS_FILE: /run/secrets/codex-gateway/credentials.json
     volumes:
       # ONLY the dedicated Colima VM socket, never Docker Desktop/projects-main.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -29,6 +36,8 @@ services:
       - ${MERGERAIL_RUNTIME_DIR:?private directory}/outbox:/outbox
       - ${MERGERAIL_RUNTIME_DIR}/secrets/web-password:/run/secrets/web-password:ro
       - ${MERGERAIL_RUNTIME_DIR}/secrets/ngrok.yml:/run/secrets/ngrok.yml:ro
+      # Access token only, refreshed on the trusted Mac; no login/refresh cache.
+      - ${MERGERAIL_RUNTIME_DIR}/secrets/codex-gateway:/run/secrets/codex-gateway:ro
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=64m
     logging:

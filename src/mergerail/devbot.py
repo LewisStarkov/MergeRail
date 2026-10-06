@@ -82,8 +82,10 @@ class DevBotWebFront(WebFront):
             raise ValueError("DevBot requires mandatory Docker execution and local delivery")
         if config.base_branch != "main" or config.baseline_mode != "strict" or not config.checks:
             raise ValueError("DevBot requires main and strict checks")
-        if any(agent.backend != "opencode" for agent in (config.fixer, config.reviewer)):
-            raise ValueError("DevBot online execution supports keyless OpenCode only")
+        if any(
+            agent.backend not in {"opencode", "codex"} for agent in (config.fixer, config.reviewer)
+        ):
+            raise ValueError("DevBot online execution supports OpenCode and Codex only")
         super().__init__(store, host="127.0.0.1", port=8788)
         self.root = config.root
         self.state_dir = config.state_dir

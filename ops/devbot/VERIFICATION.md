@@ -70,3 +70,22 @@ Private detailed evidence and logs are in
 `final-deployment-verification.json`, `automatic-rollback-verification.json`,
 `access-verification.json`, `user-result-verification.json` and
 `live-online-isolation.json`. Secrets are excluded from this report and Git.
+# Codex switch — 2026-10-06
+
+The dedicated controller now selects Codex `gpt-6.1-sol`, reasoning `high`, for
+both fixer and reviewer through explicit Compose overrides. Authentication uses
+the operator's ChatGPT subscription; OpenAI API billing is disabled. The host
+broker retains the normal login/refresh cache and exports only access credentials.
+
+Live Docker acceptance passed in 108.70 seconds: fixer edits, resumed conversation
+in a second container, offline checks, and structured APPROVE from a reviewer whose
+write and chmod attempts were denied. The regular suite passed (807 passed,
+8 skipped, 80.26% coverage); additional real Bash broker lifecycle tests passed.
+Ruff and mypy passed. A SIGTERM fault against the deployed credential broker
+caused it to restart while the deployment adapter's PID remained unchanged.
+
+Pinned images: controller
+`sha256:0410a48662dff80227494785a5fb23517ab2efcb13853186b654e98f9def0670`,
+worker `sha256:8faf24f36aeb648ea38542e73e0beb6b82ff898668cedd5b71b594692ea60bd9`.
+Private evidence is in `codex-switch-verification.json`, `codex-live-acceptance.log`
+and `codex-broker-recovery.json` under the runtime directory.

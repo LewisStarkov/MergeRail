@@ -27,8 +27,22 @@ uses UID 0; project commands execute as UID 65534 (fixer/checks) or 65533
 Agent turns take at most
 600 seconds, with at most three rounds; each check stage is limited to 1800
 seconds. Failed Docker preflight stops the service; host fallback is forbidden.
-Online execution uses keyless `opencode/space-bunny-free` exclusively. The
-controller image includes verified zero-cost model metadata.
+Fixer and reviewer use Codex `gpt-6.1-sol` through the ChatGPT subscription.
+Compose explicitly sets `MERGERAIL_FIXER_*` and `MERGERAIL_REVIEWER_*` operator
+overrides, so the committed application's OpenCode defaults remain compatible
+with older releases. This also avoids introducing an unrelated application
+commit solely to change the execution provider.
+The trusted host credential broker refreshes the normal Codex login and atomically
+exports only its access token and account ID every 15 seconds into a private
+directory. Exports expire after 120 seconds and are mounted only into the trusted
+controller; the source-free gateway receives credentials through bounded stdin.
+Workers never receive the login cache, refresh token or access token. API billing
+is not enabled. If authentication is revoked, run `codex login` on the Mac and
+retry the failed task. Keyless OpenCode remains supported as an explicit alternative.
+If the credential broker exits, the supervisor restarts it without interrupting
+an active deployment. Stale exports fail closed. Colima maps the private mount's
+owner to UID 0 inside the controller; its reader still requires owner UID 0 and
+mode 0600, while the host broker requires the Mac user's UID and directory mode 0700.
 
 BuildKit is another trusted component within the dedicated VM. It needs
 privileges there for Linux build namespaces and amd64 emulation; it has no

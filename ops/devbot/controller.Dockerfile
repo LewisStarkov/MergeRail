@@ -3,7 +3,6 @@ FROM ngrok/ngrok@sha256:14d80d083e5b53145f416bbbd36238336c9de4016c43fd950eb2eb84
 FROM ghcr.io/anomalyco/opencode@sha256:d654ecb68ae52ae3abcc56a2a07ff25647e33c38d5a7fc880c5ee20ee54c7d30
 USER root
 RUN apk add --no-cache python3 git
-COPY models.json /root/.cache/opencode/models.json
 COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=ngrok /bin/ngrok /usr/local/bin/ngrok
 COPY src/mergerail /opt/mergerail/src/mergerail

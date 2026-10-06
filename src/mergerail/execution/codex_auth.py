@@ -179,6 +179,11 @@ def gateway_credentials(mode: str) -> dict[str, str]:
         raise CodexAuthError("execution.codex_auth must be 'chatgpt' or 'api'")
     if os.name == "nt":
         raise CodexAuthError("Docker Codex authentication requires Linux or macOS")
+    exported = os.environ.get("MERGERAIL_CODEX_GATEWAY_CREDENTIALS_FILE")
+    if exported:
+        if mode != "chatgpt":
+            raise CodexAuthError("Exported gateway credentials support ChatGPT authentication only")
+        return _exported_credentials(Path(exported))
     if mode == "api" and os.environ.get("MERGERAIL_CODEX_ALLOW_API_BILLING") != "1":
         raise CodexAuthError(
             "API billing requires MERGERAIL_CODEX_ALLOW_API_BILLING=1 on the controller host"
@@ -208,3 +213,49 @@ def gateway_credentials(mode: str) -> dict[str, str]:
         "authorization": "Bearer " + _header(tokens.get("access_token")),
         "chatgpt-account-id": _header(tokens.get("account_id")),
     }
+
+
+def _exported_credentials(path: Path) -> dict[str, str]:
+    """Read a short-lived, operator-owned export without touching a login cache."""
+
+    try:
+        owner = int(os.environ.get("MERGERAIL_CODEX_GATEWAY_CREDENTIALS_UID", str(os.getuid())))
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != owner
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise CodexAuthError("Gateway credential export must be private and operator-owned")
+            raw = stream.read(65537)
+        if len(raw) > 65536:
+            raise CodexAuthError("Gateway credential export exceeds its size limit")
+        record = json.loads(raw)
+        if not isinstance(record, dict) or set(record) != {
+            "authorization",
+            "chatgpt-account-id",
+            "expires_at",
+        }:
+            raise CodexAuthError("Gateway credential export is malformed")
+        expiry = record["expires_at"]
+        if (
+            isinstance(expiry, bool)
+            or not isinstance(expiry, int | float)
+            or not time.time() < expiry <= time.time() + 180
+        ):
+            raise CodexAuthError(
+                "Gateway credential export expired; check the host credential broker"
+            )
+        authorization = record["authorization"]
+        if not isinstance(authorization, str) or not authorization.startswith("Bearer "):
+            raise CodexAuthError("Gateway credential export is malformed")
+        return {
+            "authorization": "Bearer " + _header(authorization[7:]),
+            "chatgpt-account-id": _header(record["chatgpt-account-id"]),
+        }
+    except (OSError, ValueError, TypeError) as error:
+        if isinstance(error, CodexAuthError):
+            raise
+        raise CodexAuthError("Gateway credential export is unavailable") from None
