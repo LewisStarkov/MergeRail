@@ -133,6 +133,9 @@ A refused rollback becomes `blocked`
 and stops the queue for operator inspection. It never downgrades/restores a
 database or blindly restarts code across a migration marker. `Retry deploy`
 uses the saved bundle/SHA and does not rerun fixer or review.
+Recovery checks retained app/gateway/backup images before invoking the rollback
+wrapper. Missing images block recovery; prepare the saved SHA's images in the
+isolated VM rather than letting a legacy helper build on the application server.
 
 Docker logs are capped at 2 × 5 MiB; audit at 4 × 5 MiB; adapter logs at
 3 × 5 MiB; build/deploy/rollback logs at 5 MiB each. Worker artifact cache is

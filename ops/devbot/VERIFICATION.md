@@ -56,7 +56,11 @@ healthy/unhealthy probes and missing/invalid rollback metadata.
 - Docker's default context remained `desktop-linux`; task/build execution used
   the separate `colima-mergerail-devbot` Engine. Only its own resources were managed.
 
-MergeRail's full Python suite passed with 80.20% coverage; Ruff and mypy passed.
+The retained images for the previous working release were checked on the real
+server. A regression test verifies that a missing image prevents the rollback
+wrapper from running, excluding legacy server-side build fallback.
+
+MergeRail's full Python suite passed with 80.19% coverage; Ruff and mypy passed.
 Web UI: 21 tests, TypeScript checking and production build passed. Independent
 security/correctness reviews completed; the reported rollback transport and
 restart recovery defects were fixed and regression-tested.

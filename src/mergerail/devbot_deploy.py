@@ -269,6 +269,7 @@ class DevBotDeployer:
     def rollback(self, previous: str, expected_current: str) -> None:
         if not re.fullmatch(r"[a-f0-9]{40}", previous):
             raise ValueError("invalid previous release SHA")
+        self.rollback_images(previous)
         # The existing rollback command verifies schema and database identity and
         # refuses migration-in-progress. No database downgrade or restore occurs.
         status = self.run_rollout(
@@ -284,6 +285,24 @@ class DevBotDeployer:
         )
         if status or self.verified() != previous or not self.healthy_release(previous):
             raise RuntimeError("previous release recovery needs operator inspection")
+
+    def rollback_images(self, previous: str) -> None:
+        # Legacy rollout helpers can build missing images on the application
+        # server. Recovery must use retained images, never that fallback.
+        if not re.fullmatch(r"[a-f0-9]{40}", previous):
+            raise ValueError("invalid previous release SHA")
+        self.remote(
+            "set -eu\n"
+            f"release=/opt/rivals-dev-releases/{previous}\n"
+            "for entry in app:APP_TAG gateway:GATEWAY_TAG backup:BACKUP_TAG; do\n"
+            'role="${entry%%:*}"; key="${entry#*:}"\n'
+            'tag=$(awk -F= -v key="$key" \'$1 == key {print $2}\' "$release/.release.env")\n'
+            '[[ "$tag" =~ ^[a-f0-9]{20}$ ]] || exit 2\n'
+            'docker image inspect "rivals-dev-$role:$tag" >/dev/null || '
+            '{ echo "Retained rollback image missing; isolated preparation required" >&2; '
+            "exit 1; }\n"
+            "done\n"
+        )
 
     def deploy(self, directory: Path) -> None:
         status_path = directory / "status.json"

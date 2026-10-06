@@ -199,6 +199,24 @@ def test_interrupted_rollout_without_saved_previous_blocks_queue(
     assert read_record(directory / "status.json")["status"] == "blocked"
 
 
+def test_missing_rollback_image_cannot_trigger_server_build(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    front, _, directory = publication(repo, monkeypatch)
+    worker = deployer(repo, front.outbox, monkeypatch)
+    previous = read_record(directory / "request.json")["base_sha"]
+
+    def missing(script: str) -> str:
+        assert "docker image inspect" in script
+        assert "rivals-dev-" in script
+        raise RuntimeError("Retained rollback image missing; isolated preparation required")
+
+    monkeypatch.setattr(worker, "remote", missing)
+    monkeypatch.setattr(worker, "run_wrapper", lambda *_: pytest.fail("server build fallback"))
+    with pytest.raises(RuntimeError, match="rollback image missing"):
+        worker.rollback(previous, previous)
+
+
 @pytest.mark.parametrize(
     "name",
     [
