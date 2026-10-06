@@ -92,7 +92,9 @@ _LOGIN_ASSETS = {"/login.css", "/login.js"}
 
 SESSION_COOKIE = "mergerail_session"
 
-ACTION = re.compile(r"/api/tasks/(\d+)/(retry|retry-task|retry-delivery|cancel|close|delete)")
+ACTION = re.compile(
+    r"/api/tasks/(\d+)/(retry|retry-task|retry-delivery|retry-deploy|cancel|close|delete)"
+)
 MESSAGES = re.compile(r"/api/tasks/(\d+)/messages")
 
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
@@ -889,6 +891,8 @@ class _Handler(BaseHTTPRequestHandler):
                 changed = self.front.wait_for_change(version, timeout=15)
                 if changed is None:
                     return
+                if not self.front.authenticated(self.headers.get("Cookie", "")):
+                    return
                 if changed == version:
                     self.wfile.write(b": keepalive\n\n")
                 else:
@@ -901,6 +905,7 @@ class _Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
         finally:
+            self.close_connection = True
             self.front.release_stream()
 
 

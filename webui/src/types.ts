@@ -44,6 +44,14 @@ export interface Task {
   message_revision?: number;
   last_message_at?: string;
   delivery?: Delivery;
+  deployment?: {
+    status: string;
+    sha?: string;
+    artifact_id?: string;
+    url?: string;
+    error?: string;
+    previous_sha?: string;
+  };
   execution?: {
     backend?: string;
     validated?: boolean;

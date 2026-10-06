@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import shutil
 import subprocess
@@ -46,7 +47,8 @@ class NgrokTunnel:
         self.username = ""
         self.password = ""
         self._name = f"mergerail-{secrets.token_hex(4)}"
-        self._log_path = state_dir / "ngrok.log"
+        log_dir = Path(os.environ.get("MERGERAIL_NGROK_LOG_DIR", str(state_dir)))
+        self._log_path = log_dir / "ngrok.log"
 
     def start(self, front: Front) -> str:
         if not isinstance(front, WebFront):
@@ -73,10 +75,16 @@ class NgrokTunnel:
             str(self._log_path),
             "--log-format",
             "json",
+            "--inspect=false",
         ]
+        config_file = os.environ.get("MERGERAIL_NGROK_CONFIG", "").strip()
+        if config_file:
+            if not Path(config_file).is_file():
+                raise SystemExit("mergerail: ngrok config file is missing")
+            command.extend(["--config", config_file])
         if self.policy is not None:
             command.extend(["--traffic-policy-file", str(self.policy)])
-        elif not self.unsafe:
+        elif not self.unsafe and not front.auth_enabled:
             self.username = "mergerail"
             self.password = secrets.token_urlsafe(12)
             front.enable_auth(self.username, self.password)
@@ -104,7 +112,7 @@ class NgrokTunnel:
                 password=self.password,
                 note="generated for this session",
             )
-        elif self.unsafe:
+        elif self.unsafe and not front.auth_enabled:
             log.warn("ngrok.unprotected", note="anyone with the URL can control MergeRail")
         return self.url
 

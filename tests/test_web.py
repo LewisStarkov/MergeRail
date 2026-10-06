@@ -626,3 +626,23 @@ def test_event_streams_have_a_connection_cap(tmp_path: Path) -> None:
     served.release_stream()
     assert served.acquire_stream()
     served.release_stream()
+
+
+def test_sse_closes_when_session_is_revoked(front: WebFront) -> None:
+    front.enable_auth("owner", "private-password")
+    token = front.authenticate("owner", "private-password")
+    assert token
+    cookie = f"mergerail_session={token}"
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{front.port}/api/events", headers={"Cookie": cookie},
+    )
+    with urllib.request.urlopen(request, timeout=3) as response:
+        assert response.readline().startswith(b"id:")
+        assert response.readline().startswith(b"data:")
+        assert response.readline() == b"\n"
+        front.logout(cookie)
+        front._changed()
+        assert response.readline() == b""
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request, timeout=3)
+    assert error.value.code == 401

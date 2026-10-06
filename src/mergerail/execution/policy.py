@@ -33,12 +33,15 @@ class ExecutionPolicy:
     upstream_host: str = "opencode.ai"
     upstream_prefix: str = "/zen/v1"
     opencode_model: str = "opencode/space-bunny-free"
+    release_scope: str = ""
 
     @property
     def digest(self) -> str:
         return hashlib.sha256(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()
 
     def validate(self) -> None:
+        if self.release_scope not in {"", "rivals-dev"}:
+            raise ValueError("execution.release_scope supports rivals-dev only")
         if self.backend != "docker" or self.required is not True or self.profile != "eco":
             raise ValueError("execution requires backend='docker', required=true, profile='eco'")
         for name in ("image", "gateway_image"):

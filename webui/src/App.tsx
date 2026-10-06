@@ -327,6 +327,13 @@ function TaskWorkspace({task, onBack, refresh, notify, inputRef}: {
           {task.delivery.errors?.map((item, index) => <pre key={`${item.code}-${index}`}>{item.stage ? `${item.stage}: ` : ""}{item.message || item.code}</pre>)}
         </div></div>
       </section>}
+      {task.deployment && <section class="record-section"><SectionHeading index="D" title="DevBot deployment" />
+        <div class="record-content"><p>{task.deployment.status}</p>
+          <code>{task.deployment.sha}</code>
+          {task.deployment.error && <pre>{task.deployment.error}</pre>}
+          {task.deployment.url && /^https:\/\//.test(task.deployment.url) && <p><a href={task.deployment.url} target="_blank" rel="noopener noreferrer">Open DevBot</a></p>}
+        </div>
+      </section>}
       <section class="record-section activity-section"><SectionHeading index="03" title="Activity ledger" meta={`${messageCount} entries`} />
         <div class="record-content">
           <ActivityEntry message={{id: 0, role: "user", author: task.author || task.source || "web", text: task.text, file: task.file || undefined, created_at: task.created_at, status: "original"}} />
@@ -562,6 +569,7 @@ function ToastRegion({items, dismiss}: {items: Toast[]; dismiss: (id: number) =>
 function actionsFor(task: Task): Array<[string, string, string]> {
   const actions: Array<[string, string, string]> = [];
   if (!task.open && task.delivery?.status === "blocked") actions.push(["retry-delivery", "Retry delivery", "retry"]);
+  if (task.deployment?.status === "failed") actions.push(["retry-deploy", "Retry deploy", "retry"]);
   if (!task.open) actions.push(["retry-task", "Retry task", "retry"]);
   if (["running", "review"].includes(task.status)) actions.push(["cancel", "Cancel", "stop"]);
   if (task.open && task.status === "new") actions.push(["close", "Close", "archive"]);

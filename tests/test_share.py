@@ -112,3 +112,32 @@ def test_ngrok_missing_binary_and_nonlocal_web_are_refused(
     public = WebFront(TaskStore(tmp_path / "tasks.json"), host="0.0.0.0")
     with pytest.raises(SystemExit, match="bind to localhost"):
         NgrokTunnel(tmp_path, tmp_path / ".mergerail").start(public)
+
+
+def test_ngrok_preserves_operator_auth_and_uses_private_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "ngrok.yml"
+    config.write_text("version: 3\n")
+    monkeypatch.setenv("MERGERAIL_NGROK_CONFIG", str(config))
+    tunnel = NgrokTunnel(tmp_path, tmp_path / ".mergerail")
+    process = Process()
+    monkeypatch.setattr("mergerail.share.shutil.which", lambda _: "/bin/ngrok")
+    command: list[str] = []
+
+    def fake_spawn(argv: list[str], **_: Any) -> Any:
+        command.extend(argv)
+        tunnel._log_path.write_text(json.dumps({"name": tunnel._name,
+                                               "url": "https://demo.ngrok.app"}))
+        return process
+
+    monkeypatch.setattr("mergerail.share.spawn", fake_spawn)
+    monkeypatch.setattr("mergerail.share.terminate_tree", lambda _: None)
+    front = WebFront(TaskStore(tmp_path / "tasks.json"))
+    front.enable_auth("owner", "persistent-private-password")
+    tunnel.start(front)
+    assert not tunnel.password and not tunnel.username
+    assert front.authenticate("owner", "persistent-private-password")
+    assert command[command.index("--config") + 1] == str(config)
+    assert "--inspect=false" in command
+    tunnel.stop()

@@ -1,0 +1,7 @@
+version: 3
+agent:
+  authtoken: REPLACE_OUTSIDE_GIT
+  web_addr: 127.0.0.1:4040
+  inspect_db_size: 0
+  update_check: false
+  remote_management: false

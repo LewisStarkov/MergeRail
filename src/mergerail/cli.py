@@ -660,7 +660,7 @@ def _share(args: argparse.Namespace, config: Config, front: str) -> Share | None
         if policy_arg or unsafe:
             raise SystemExit("mergerail: --share-policy and --share-unsafe require --share ngrok")
         return None
-    if front != "web":
+    if front != "web" and ":" not in front:
         raise SystemExit("mergerail: --share ngrok requires the web front")
     if policy_arg and unsafe:
         raise SystemExit("mergerail: --share-policy and --share-unsafe cannot be used together")

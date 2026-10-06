@@ -1065,6 +1065,16 @@ class Runner:
                 )
             return
 
+        if self.execution is not None and landed.outcome == delivery.LOCAL_MERGE:
+            from .execution.sync import host_git
+
+            self.store.update(
+                task.id,
+                execution={
+                    **self.execution.metadata,
+                    "delivered_sha": host_git(self.config.root, "rev-parse", self.config.base_branch),
+                },
+            )
         completed = self.store.complete_delivery(task.id, landed.outcome, url=landed.url)
         if completed is None:
             self.finish(task.id, Status.FAILED, "delivery succeeded but its task disappeared")

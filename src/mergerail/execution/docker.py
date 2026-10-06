@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
+from .. import log
 from ..backends import (
     AgentReply,
     BackendCapabilities,
@@ -1843,6 +1844,13 @@ class DockerExecution:
         allowed_failures: frozenset[str] = frozenset(),
         cancelled: Callable[[], bool] | None = None,
     ) -> tuple[bool, str]:
+        if self.policy.release_scope == "rivals-dev":
+            from ..devbot import check_scope
+
+            try:
+                check_scope(self.root, resolve_commit(self.root, "main"), sha)
+            except (ValueError, RuntimeError) as error:
+                return False, str(error)
         try:
             result = self._run_checks(checks, sha, cancelled=cancelled)
         except DockerExecutionError as error:
@@ -1876,6 +1884,8 @@ class DockerExecution:
         }
         healthy = [item for item in checks if by_name.get(item.name, False)]
         failing = [item for item in checks if not by_name.get(item.name, False)]
+        if failing:
+            log.warn("checks.docker_baseline_failed", report=str(result.get("report", ""))[-3000:])
         return healthy, failing
 
     def change_context(self, base: str) -> tuple[str, str]:
