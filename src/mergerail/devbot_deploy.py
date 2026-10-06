@@ -13,6 +13,7 @@ import resource
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -28,13 +29,22 @@ DEV_URL = "https://dev.rivals.baby"
 CHECKOUT = Path("/Users/lama/.local/share/mergerail-devbot/deployer/checkout")
 
 
-def health(sha: str) -> bool:
+def probe_health(sha: str, url: str = DEV_URL + "/health") -> tuple[bool, str]:
     try:
-        request = urllib.request.Request(DEV_URL + "/health", headers={"Cache-Control": "no-cache"})
+        request = urllib.request.Request(
+            url, headers={"Cache-Control": "no-cache", "User-Agent": "Rivals-Deploy/1.0"}
+        )
         with urllib.request.urlopen(request, timeout=15) as response:
-            return bool(json.load(response) == {"status": "ok", "revision": sha})
-    except (OSError, ValueError):
-        return False
+            raw = response.read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            return False, "health response exceeds 64 KiB"
+        if json.loads(raw) != {"status": "ok", "revision": sha}:
+            return False, "health status/revision differs from the approved SHA"
+        return True, ""
+    except urllib.error.HTTPError as error:
+        return False, f"health endpoint returned HTTP {error.code}"
+    except (OSError, ValueError) as error:
+        return False, f"health request failed: {type(error).__name__}"
 
 
 class DevBotDeployer:
@@ -46,6 +56,7 @@ class DevBotDeployer:
             raise ValueError("DevBot deployment requires its verified automation checkout on main")
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.lease = RunnerLease(self.state / "deployer.lock")
+        self.health_error = ""
 
     def remote(self, script: str) -> str:
         result = subprocess.run(
@@ -74,17 +85,23 @@ class DevBotDeployer:
             raise ValueError("DevBot has no valid verified SHA")
         return sha
 
+    def healthy(self, sha: str) -> bool:
+        passed, self.health_error = probe_health(sha)
+        return passed
+
     def healthy_release(self, sha: str) -> bool:
         # Legacy releases exposed their content tag; new releases expose the SHA.
         revision = self.remote(
             "set -eu\n"
-            f'awk -F= \'$1 == "RIVALS_RELEASE_SHA" {{sha=$2}} '
-            f'$1 == "APP_TAG" {{tag=$2}} END {{print sha ? sha : tag}}\' '
-            f"/opt/rivals-dev-releases/{sha}/.release.env\n"
+            f"release=/opt/rivals-dev-releases/{sha}\n"
+            "key=APP_TAG\n"
+            "if grep -Fq '${RIVALS_RELEASE_SHA' \"$release/compose.prod.yml\"; then "
+            "key=RIVALS_RELEASE_SHA; fi\n"
+            'awk -F= -v key="$key" \'$1 == key {print $2}\' "$release/.release.env"\n'
         )
         if not re.fullmatch(r"[a-f0-9]{20}|[a-f0-9]{40}", revision):
             raise ValueError("invalid release revision metadata")
-        return health(revision)
+        return self.healthy(revision)
 
     def write_status(self, directory: Path, request: dict[str, Any], **values: Any) -> None:
         record = {**request, **values, "updated_at": now_iso(), "url": DEV_URL}
@@ -306,7 +323,7 @@ class DevBotDeployer:
             return
         if not is_ancestor(self.root, previous, sha):
             raise ValueError("verified DevBot release is outside the reviewed ancestry")
-        if self.verified() == sha and health(sha):
+        if self.verified() == sha and self.healthy(sha):
             self.write_status(
                 directory, request, status="succeeded", previous_sha=previous, retry_id=retry_id
             )
@@ -339,7 +356,7 @@ class DevBotDeployer:
             ],
             self.state / "deploy.log",
         )
-        if code == 0 and self.verified() == sha and health(sha):
+        if code == 0 and self.verified() == sha and self.healthy(sha):
             self.write_status(
                 directory, request, status="succeeded", previous_sha=previous, retry_id=retry_id
             )
@@ -370,7 +387,11 @@ class DevBotDeployer:
                 server_state=actual,
             )
             raise RuntimeError("DevBot external state changed; queue blocked")
-        reason = f"CPD/health verification failed (exit {code}); see private deploy.log"
+        reason = (
+            f"CPD failed (exit {code}); see private deploy.log"
+            if code
+            else "post-deploy health verification failed: " + self.health_error
+        )
         # A failed public check can leave candidate containers active even when
         # the canonical symlink still points at the old release.
         try:

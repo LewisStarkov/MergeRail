@@ -134,7 +134,7 @@ def test_failure_recovers_previous_and_explicit_retry_uses_same_sha(
     monkeypatch.setattr(worker, "run_wrapper", wrapper)
     monkeypatch.setattr(worker, "verified", lambda: str(live["sha"]))
     monkeypatch.setattr(worker, "remote", lambda _: str(live["sha"]))
-    monkeypatch.setattr("mergerail.devbot_deploy.health", lambda sha: live["sha"] == sha)
+    monkeypatch.setattr(worker, "healthy", lambda sha: live["sha"] == sha)
     worker.deploy(directory)
     assert read_record(directory / "status.json")["status"] == "failed"
     assert live["sha"] == request["base_sha"]
@@ -200,7 +200,7 @@ def test_refused_rollback_blocks_queue_and_preserves_server_evidence(
             else request["base_sha"] + "\nrivals-dev-webapp candidate"
         ),
     )
-    monkeypatch.setattr("mergerail.devbot_deploy.health", lambda _: False)
+    monkeypatch.setattr(worker, "healthy", lambda _: False)
     with pytest.raises(RuntimeError, match="recovery needs"):
         worker.tick()
     record = read_record(directory / "status.json")
@@ -279,3 +279,42 @@ def test_rollout_deadline_keeps_external_process_and_blocks_queue(
     assert not ended.is_set()
     finish.set()
     assert ended.wait(1)
+
+
+def test_health_failure_reports_http_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+
+    from mergerail.devbot_deploy import probe_health
+
+    def denied(*_: object, **__: object) -> object:
+        raise urllib.error.HTTPError("https://dev.rivals.baby/health", 503, "unhealthy", {}, None)
+
+    monkeypatch.setattr("mergerail.devbot_deploy.urllib.request.urlopen", denied)
+    assert probe_health("a" * 40) == (False, "health endpoint returned HTTP 503")
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (json.dumps({"status": "ok", "revision": "a" * 40}).encode(), (True, "")),
+        (
+            b'{"status":"ok","revision":"old"}',
+            (False, "health status/revision differs from the approved SHA"),
+        ),
+        (b"x" * (64 * 1024 + 1), (False, "health response exceeds 64 KiB")),
+        (b"not-json", (False, "health request failed: JSONDecodeError")),
+    ],
+)
+def test_health_requires_bounded_matching_revision(
+    monkeypatch: pytest.MonkeyPatch, payload: bytes, expected: tuple[bool, str]
+) -> None:
+    import io
+
+    from mergerail.devbot_deploy import probe_health
+
+    def respond(request: object, **_: object) -> io.BytesIO:
+        assert request.headers["User-agent"] == "Rivals-Deploy/1.0"
+        return io.BytesIO(payload)
+
+    monkeypatch.setattr("mergerail.devbot_deploy.urllib.request.urlopen", respond)
+    assert probe_health("a" * 40) == expected
