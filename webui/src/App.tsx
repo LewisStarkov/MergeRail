@@ -1,6 +1,7 @@
 import {type ComponentChildren, type JSX} from "preact";
 import {useCallback, useEffect, useMemo, useReducer, useRef, useState} from "preact/hooks";
 import {api, encodeFile, RequestError, validateFile} from "./api";
+import {agentRole, ROLES, taskProgress} from "./progress";
 import {Icon} from "./icons";
 import {shortcutFor} from "./keyboard";
 import {LedgerSelect, type LedgerOption} from "./LedgerSelect";
@@ -233,9 +234,10 @@ function Queue({id, tasks, allTasks, selectedId, query, filter, searchRef, onQue
 }
 
 function TaskRow({task, selected, onSelect}: {task: Task; selected: boolean; onSelect: (id: number) => void}) {
+  const progress = taskProgress(task);
   return <button type="button" role="option" aria-selected={selected} class="task-row" onClick={() => onSelect(task.id)}>
     <span class="task-number">MR-{String(task.id).padStart(4, "0")}</span>
-    <span class="task-copy"><strong>{firstLine(task.text) || "Attachment-only task"}</strong><small>{task.branch || task.source || "web"}{task.message_count ? ` · ${task.message_count} notes` : ""}</small></span>
+    <span class="task-copy"><strong>{firstLine(task.text) || "Attachment-only task"}</strong><small>{progress.actor} · {progress.title}</small></span>
     <Status value={task.status} />
   </button>;
 }
@@ -309,7 +311,8 @@ function TaskWorkspace({task, onBack, refresh, notify, inputRef}: {
       <Fact label="Cost" value={task.cost_usd ? `$${task.cost_usd.toFixed(2)}` : "—"} />
     </div>
     <div class="workspace-scroll">
-      {task.execution?.backend === "docker" && <section class="record-section"><SectionHeading index="00" title="Docker execution" />
+      <TaskOverview task={task} />
+      {task.execution?.backend === "docker" && <details class="technical-details"><summary>Технические детали · Docker и сохранённый результат</summary><section class="record-section"><SectionHeading index="00" title="Docker execution" />
         <div class="record-content">
           <p>{task.execution.validated ? "Isolation validated" : "Isolation pending"}{task.execution.phase && ` · ${task.execution.phase}`}</p>
           {task.execution.memory_mib && <p>RAM: {task.execution.memory_mib} MiB · Workspace: {task.execution.workspace_limit_mib} MiB</p>}
@@ -317,11 +320,11 @@ function TaskWorkspace({task, onBack, refresh, notify, inputRef}: {
           {task.execution.result_sha && <p>Saved result: <code>{task.execution.result_sha}</code></p>}
           {task.execution.recovery?.status && <p>Recovery: {task.execution.recovery.status}</p>}
         </div>
-      </section>}
-      <section class="record-section description"><SectionHeading index="01" title="Request" />
+      </section></details>}
+      <section class="record-section description"><SectionHeading index="01" title="Ваш запрос" />
         <div class="record-content"><p class="request-text">{task.text || "Attachment-only task"}</p>{task.file && <Attachment file={task.file} />}</div>
       </section>
-      {task.delivery && Boolean(task.delivery.status !== "none" || task.delivery.summary || task.delivery.errors?.length) && <section class="record-section"><SectionHeading index="02" title="Delivery" />
+      {task.delivery && Boolean(task.delivery.status !== "none" || task.delivery.summary || task.delivery.errors?.length) && <section class="record-section"><SectionHeading index="02" title="Применение" />
         <div class="record-content"><div class="delivery-line"><Status value={task.delivery.status || "pending"} />
           {(task.delivery.stage || task.delivery.outcome || task.delivery.summary) && <p>{[task.delivery.stage, task.delivery.outcome, task.delivery.summary].filter(Boolean).join(" · ")}</p>}
           {task.delivery.errors?.map((item, index) => <pre key={`${item.code}-${index}`}>{item.stage ? `${item.stage}: ` : ""}{item.message || item.code}</pre>)}
@@ -334,7 +337,7 @@ function TaskWorkspace({task, onBack, refresh, notify, inputRef}: {
           {task.deployment.url && /^https:\/\//.test(task.deployment.url) && <p><a href={task.deployment.url} target="_blank" rel="noopener noreferrer">Open DevBot</a></p>}
         </div>
       </section>}
-      <section class="record-section activity-section"><SectionHeading index="03" title="Activity ledger" meta={`${messageCount} entries`} />
+      <section class="record-section activity-section"><SectionHeading index="03" title="Ход работы" meta={`${messageCount} entries`} />
         <div class="record-content">
           <ActivityEntry message={{id: 0, role: "user", author: task.author || task.source || "web", text: task.text, file: task.file || undefined, created_at: task.created_at, status: "original"}} />
           {messages.map((message) => <ActivityEntry key={message.id} message={message} />)}
@@ -354,6 +357,24 @@ function TaskWorkspace({task, onBack, refresh, notify, inputRef}: {
   </>;
 }
 
+function TaskOverview({task}: {task: Task}) {
+  const progress = taskProgress(task);
+  const [help, setHelp] = useState(false);
+  return <section class={`task-overview ${progress.attention ? "needs-attention" : ""}`} aria-label="Что происходит сейчас">
+    <div class="overview-heading"><span class="eyebrow">Что происходит сейчас</span><button class="quiet-button" onClick={() => setHelp(true)}><Icon name="help" /> Как это работает</button></div>
+    <h3>{progress.title}</h3><strong class="overview-actor">{progress.actor}</strong><p>{progress.detail}</p>
+    <ol class="task-steps" aria-label="Этапы задачи">{progress.steps.map((step, index) => <li key={step.label} class={`step-${step.state}`} aria-current={step.state === "current" ? "step" : undefined}>
+      <span aria-hidden="true">{step.state === "complete" ? "✓" : index + 1}</span><strong>{step.label}</strong><small>{{pending: "Ожидает", current: "Сейчас", complete: "Пройдено", attention: "Остановка", optional: "По настройке", unknown: "Не подтверждено"}[step.state]}</small>
+    </li>)}</ol>
+    <div class="overview-next"><div><span>Далее</span><p>{progress.next}</p></div><strong>{progress.attention ? "Нужно ваше внимание" : "Действий от вас не требуется"}</strong></div>
+    {help && <Dialog title="Кто что делает" close={() => setHelp(false)} className="roles-dialog">
+      <dl>{Object.entries(ROLES).map(([key, role]) => <div key={key}><dt>{role.name}</dt><dd>{role.purpose}</dd></div>)}</dl>
+      <p>Codex — инструмент агента. Разработчик и ревьюер выполняют разные задачи, даже если используют одну модель.</p>
+      <p>Замечания возвращают работу разработчику. Изменения снова проходят проверки и ревью. DevBot публикует результат только при настроенном деплое; завершённая задача сама по себе не означает публикацию.</p>
+    </Dialog>}
+  </section>;
+}
+
 function SectionHeading({index, title, meta}: {index: string; title: string; meta?: string}) {
   return <header class="section-heading"><span>{index}</span><h3>{title}</h3>{meta && <small>{meta}</small>}</header>;
 }
@@ -367,12 +388,13 @@ function Status({value}: {value: string}) {
 }
 
 function ActivityEntry({message}: {message: Message}) {
-  const name = message.author || (message.role === "assistant" ? "agent" : message.role) || "system";
+  const role = agentRole(message.author || message.role || "");
+  const name = role?.name || (message.role === "user" ? "Вы" : "") || message.author || (message.role === "assistant" ? "agent" : message.role) || "system";
   return <article class={`activity-entry role-${message.role || "system"}`}>
     <div class="activity-rule"><span /></div>
     <div class="activity-body">
       <header><strong>{name}</strong>{message.mode && <span>{message.mode}</span>}{message.status && <span>{message.status}</span>}<time>{formatTime(message.created_at)}</time></header>
-      <p>{message.text}</p>{message.file && <Attachment file={message.file} />}
+      {role && <small class="role-purpose">{role.purpose}</small>}<p>{message.text}</p>{message.file && <Attachment file={message.file} />}
     </div>
   </article>;
 }
@@ -380,8 +402,8 @@ function ActivityEntry({message}: {message: Message}) {
 function LiveActivity({task}: {task: Task}) {
   const roles = Object.entries(task.live?.roles ?? {});
   if (!roles.length) return null;
-  return <details class="live-activity" open><summary><span class="live-pulse" />Agent activity · {task.live?.stage || "working"}</summary>
-    {roles.map(([role, value]) => <div class="live-role" key={role}><header><strong>{role}</strong><span>{value.status || "active"}</span></header>{value.text && <pre>{value.text}</pre>}{value.tools?.slice(-6).map((tool) => <code key={tool}>{tool}</code>)}</div>)}
+  return <details class="live-activity"><summary>Поток агента · технический журнал</summary>
+    {roles.map(([role, value]) => <div class="live-role" key={role}><header><strong>{agentRole(role)?.name || role}</strong><span>{value.status || "active"}</span></header>{value.text && <pre>{value.text}</pre>}{value.tools?.slice(-6).map((tool) => <code key={tool}>{tool}</code>)}</div>)}
   </details>;
 }
 
@@ -544,6 +566,7 @@ function Dialog({title, close, className = "", children}: {title: string; close:
     return () => { if (previousFocus.current instanceof HTMLElement) previousFocus.current.focus(); };
   }, []);
   const keyDown: JSX.KeyboardEventHandler<HTMLDivElement> = (event) => {
+    event.stopPropagation();
     if (event.key === "Escape") {event.preventDefault(); close(); return;}
     if (event.key !== "Tab" || !panel.current) return;
     const nodes = [...panel.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")].filter((node) => !node.hidden);

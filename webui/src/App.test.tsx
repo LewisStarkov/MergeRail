@@ -55,6 +55,23 @@ afterEach(() => {
 });
 
 describe("App integration contracts", () => {
+  it("explains the reviewer role and keeps technical details collapsed", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(response(
+      String(input) === "/api/tasks"
+        ? {tasks: [{...task, status: "review", execution: {backend: "docker"}, live: {stage: "reviewing", roles: {fixer: {status: "complete"}}}}], setup: {}}
+        : {messages: [], message_count: 0}
+    ))));
+    render(<App />);
+    await screen.findByText("Ревьюер проверяет результат", {selector: "h3"});
+    expect(screen.getByText("Технические детали · Docker и сохранённый результат").closest("details")?.open).toBe(false);
+    fireEvent.click(screen.getByRole("button", {name: "Как это работает"}));
+    expect(screen.getByRole("dialog").textContent).toContain("Код не меняет");
+    fireEvent.keyDown(screen.getByRole("dialog"), {key: "n"});
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", {name: "Close"}));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("renders Docker recovery metadata from the task API", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input) === "/api/tasks") return Promise.resolve(response({

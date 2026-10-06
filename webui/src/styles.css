@@ -322,3 +322,45 @@ kbd { border: 1px solid var(--rule); border-bottom-color: var(--rule-strong); bo
   .selector-listbox [role="option"].is-active { outline: 2px solid Highlight; }
   .primary-button { background: ButtonFace; color: ButtonText; border-color: ButtonText; }
 }
+
+.task-overview { padding: 18px 22px; border-bottom: 1px solid var(--rule-strong); background: var(--surface-strong); }
+.overview-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.task-overview h3 { margin: 10px 0 6px; font-size: 19px; line-height: 1.35; }
+.overview-actor { color: var(--accent-strong); font-size: 12px; }
+.task-overview > p { margin: 8px 0 16px; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+.task-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); list-style: none; padding: 0; margin: 0; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+.task-steps li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 4px; padding: 10px 8px; border-right: 1px solid var(--rule); color: var(--ink-faint); font-size: 11px; }
+.task-steps li:last-child { border-right: 0; }
+.task-steps li > span { grid-row: span 2; }
+.task-steps strong { overflow-wrap: anywhere; }
+.task-steps small { font-size: 10px; }
+.task-steps .step-current { background: var(--accent-soft); color: var(--accent-strong); }
+.task-steps .step-complete { color: var(--ink-soft); }
+.task-steps .step-attention { background: var(--amber-wash); color: var(--amber); }
+.needs-attention h3 { color: var(--amber); }
+.overview-next { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; font-size: 11px; }
+.overview-next span { color: var(--ink-faint); }
+.overview-next p { margin: 4px 0 0; line-height: 1.5; }
+.overview-next > strong { flex-shrink: 0; font-weight: 500; color: var(--ink-soft); }
+.needs-attention .overview-next > strong { color: var(--amber); }
+.technical-details { border-bottom: 1px solid var(--rule); }
+.technical-details > summary { padding: 12px 22px; cursor: pointer; color: var(--ink-soft); font-size: 11px; }
+.technical-details .record-section { border-bottom: 0; }
+.role-purpose { display: block; color: var(--ink-faint); font-size: 11px; line-height: 1.5; margin: 6px 0; }
+.roles-dialog { padding-bottom: 20px; }
+.roles-dialog dl, .roles-dialog > p { margin: 18px 22px; line-height: 1.6; font-size: 13px; }
+.roles-dialog dl > div { padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.roles-dialog dt { font-weight: 600; }
+.roles-dialog dd { margin: 4px 0 0; color: var(--ink-soft); }
+@media (max-width: 900px) {
+  .task-overview { padding: 14px; }
+  .task-steps li { grid-template-columns: 1fr; padding: 8px 5px; }
+  .task-steps li > span { grid-row: auto; }
+  .overview-next { align-items: flex-start; flex-direction: column; gap: 8px; }
+}
+@media (max-width: 420px) {
+  .overview-heading .quiet-button { font-size: 10px; padding: 5px; }
+  .task-overview h3 { font-size: 17px; }
+  .task-steps li { font-size: 10px; }
+  .task-steps small { font-size: 9px; }
+}
