@@ -96,3 +96,21 @@ after `exec` replaced the gateway provider overrides before `exec`, so the clien
 tried direct DNS and the isolated network refused it. All config overrides now
 precede `exec`; the high-effort live test covers that routing regression. Failed
 attempts deployed nothing and preserved the verified application release.
+
+Task 3 was retried through the authenticated public URL with the corrected
+Codex routing. Both roles ran as unprivileged container users; session metadata
+confirmed provider `mergerail`. The first two candidates passed the full offline
+checks. Review rejected the first candidate because a slow recipient blocked
+pool refills and delayed persistence of successful sends. The second candidate
+fixed that issue but released the economy gate before pending sends finished.
+Operator feedback requested transaction-held protection. The third candidate
+passed 20 targeted tests, but held the gate across the entire refillable queue,
+which could delay an economy halt indefinitely. That follow-up remains pending:
+the configured three-round limit ended the attempt before final checks/review.
+
+The retained candidate is `ce110acd002c9b29090cbf0d33ac89df864fdacc` on
+`mergerail/3/a3`, with no approved SHA and no deployment request. Task 3 is
+failed, not deployed. Public health and the server's verified release still
+match `436c35fd4b86f5b9d77f796a1db3e5280703384f` at
+`https://dev.rivals.baby`. The Codex switch is verified; task 3's application
+change has not completed acceptance.
