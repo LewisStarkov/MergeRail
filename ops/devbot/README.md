@@ -17,7 +17,12 @@ untrusted-worker threat model.
 Workers receive committed Git objects, never bind mounts, tunnel credentials,
 deployment credentials or Docker sockets. They use a read-only root, dropped
 capabilities, non-root execution, cgroup v2, 2 CPUs, 4 GiB RAM, 256 PIDs,
-2 GiB workspace tmpfs and 1536 MiB temporary tmpfs. Agent turns take at most
+2 GiB workspace tmpfs and 1536 MiB temporary tmpfs. The stage's trusted bootstrap
+uses UID 0; project commands execute as UID 65534 (fixer/checks) or 65533
+(reviewer). Online stages split the aggregate limits between the agent
+(1.9 CPUs, 3840 MiB, 224 PIDs) and its restricted AI gateway
+(0.1 CPU, 256 MiB, 32 PIDs); offline checks have no network.
+Agent turns take at most
 600 seconds, with at most three rounds; each check stage is limited to 1800
 seconds. Failed Docker preflight stops the service; host fallback is forbidden.
 Online execution uses keyless `opencode/space-bunny-free` exclusively. The
@@ -58,6 +63,9 @@ outbox and deployment checkout. Configure secrets from the examples if ngrok
 was not already configured. Real secret files stay outside Git with mode 0600.
 The selected catalogue is metadata from `~/.cache/opencode/models.json`, not
 credentials. [OpenCode documents its model catalogue](https://opencode.ai/docs/models/).
+Agents use the preinstalled `/opt/rivals-deps/.venv/bin/python`; the project
+policy forbids creating another `.venv` or installing dependencies. Absolute
+workspace symlinks are rejected during checkpoint validation.
 
 The extra deployment checkout is
 `/Users/lama/.local/share/mergerail-devbot/deployer/checkout`, on `main`, tracking
