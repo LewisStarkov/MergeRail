@@ -41,6 +41,8 @@ UPSTREAM_PORT = 443
 MAX_CREDENTIAL_FILE_BYTES = 64 * 1024
 MAX_AUTHORIZATION_LENGTH = 8 * 1024
 MAX_ACCOUNT_ID_LENGTH = 256
+DIAGNOSTICS_PATH = "/tmp/mergerail-gateway-diagnostics.jsonl"
+_DIAGNOSTICS_LOCK = threading.Lock()
 
 FORWARDED_HEADERS = (
     "accept",
@@ -162,6 +164,20 @@ class Upstream:
 
 def log(message: str) -> None:
     print(f"docker_ai_gateway: {message}", file=sys.stderr, flush=True)
+
+
+def record_close(reason: str, *, status: int = 0, size: int = 0) -> None:
+    """Keep a bounded, payload-free journal for the controller before teardown."""
+    data = (json.dumps({"close_reason": reason, "status": status, "bytes": size}) + "\n").encode()
+    with _DIAGNOSTICS_LOCK, contextlib.suppress(OSError):
+        fd = os.open(
+            DIAGNOSTICS_PATH,
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(fd, "ab") as journal:
+            if os.fstat(journal.fileno()).st_size + len(data) <= 16384:
+                journal.write(data)
 
 
 def is_header_value_safe(value: str) -> bool:
@@ -611,6 +627,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         except ValueError:
             self._fail(400, "the request could not be encoded")
         except (OSError, HTTPException) as error:
+            record_close("transport_error")
             log(f"upstream transport failed: {type(error).__name__}")
             self._fail(502, "upstream request failed")
 
@@ -660,6 +677,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         """Stream the response in bounded blocks; abort rather than grow."""
 
         if self.server.credentials is not None and response.status >= 400:
+            record_close("upstream_http_error", status=response.status)
             message = (
                 "upstream authentication failed; please sign in again"
                 if response.status in {401, 403}
@@ -680,12 +698,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
         total = 0
         while True:
             if time.monotonic() > deadline:
+                record_close("timeout", status=response.status, size=total)
                 raise UpstreamError("upstream response exceeded the time budget")
             block = response.read1(BLOCK_BYTES)
             if not block:
+                record_close("upstream_eof", status=response.status, size=total)
                 return
             total += len(block)
             if total > MAX_RESPONSE_BYTES:
+                record_close("size_limit", status=response.status, size=total)
                 raise UpstreamError("upstream response exceeded the size budget")
             self.wfile.write(block)
 

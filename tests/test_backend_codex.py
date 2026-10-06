@@ -5,6 +5,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from mergerail.backends import codex
 from mergerail.backends.base import SessionSpec, TurnRequest
 from mergerail.backends.process import JsonlProcessResult
@@ -168,3 +170,111 @@ def test_codex_reports_a_failed_turn_without_claiming_zero_cost(
     assert reply.is_error
     assert "bad credentials" in reply.text
     assert reply.cost_usd is None
+
+
+TRANSPORT = {
+    "type": "error",
+    "message": (
+        "Reconnecting... 1/5: stream disconnected before completion: "
+        "stream closed before response.completed"
+    ),
+}
+MESSAGE = {"type": "item.completed", "item": {"type": "agent_message", "text": "done"}}
+COMPLETED = {"type": "turn.completed"}
+
+
+@pytest.mark.parametrize(
+    ("events", "code", "error", "kind"),
+    [
+        ([TRANSPORT, MESSAGE, COMPLETED], 0, False, "none"),
+        ([MESSAGE, COMPLETED, TRANSPORT], 0, True, "transport"),
+        ([MESSAGE, TRANSPORT], 1, True, "transport"),
+        (
+            [MESSAGE, {"type": "turn.failed", "error": {"message": TRANSPORT["message"]}}],
+            1,
+            True,
+            "transport",
+        ),
+        (
+            [{"type": "error", "message": "bad credentials"}, MESSAGE, COMPLETED],
+            0,
+            True,
+            "terminal",
+        ),
+        (
+            [MESSAGE, COMPLETED, {"type": "turn.failed", "error": {"message": "denied"}}],
+            1,
+            True,
+            "terminal",
+        ),
+        ([MESSAGE, COMPLETED], 1, True, "exit"),
+        (
+            [MESSAGE, {"type": "event_msg", "payload": {"type": "task_complete"}}],
+            0,
+            True,
+            "incomplete",
+        ),
+        ([COMPLETED], 0, True, "incomplete"),
+        ([MESSAGE, COMPLETED, {"type": "turn.started"}], 0, True, "incomplete"),
+        (
+            [
+                {
+                    "type": "turn.failed",
+                    "error": {
+                        "message": (
+                            "stream disconnected before completion: "
+                            "Incomplete response returned, reason: content_filter"
+                        )
+                    },
+                }
+            ],
+            1,
+            True,
+            "terminal",
+        ),
+    ],
+)
+def test_codex_transport_completion_order(
+    repo: Path, events: list[dict[str, Any]], code: int, error: bool, kind: str
+) -> None:
+    session = codex.CodexBackend().open_session(SessionSpec("fixer", repo))
+    reply = session._reply(result(*events, returncode=code), expects_structured=False)
+    assert reply.is_error is error
+    assert reply.diagnostics[0].error_type == kind
+    assert reply.diagnostics[0].exit_code == code
+
+
+@pytest.mark.parametrize(
+    ("timed_out", "cancelled", "kind"), [(True, False, "timeout"), (False, True, "cancelled")]
+)
+def test_codex_timeout_and_cancel_never_recover(
+    repo: Path, timed_out: bool, cancelled: bool, kind: str
+) -> None:
+    session = codex.CodexBackend().open_session(SessionSpec("fixer", repo))
+    raw = JsonlProcessResult((TRANSPORT,), "", -9, timed_out, 2, cancelled)
+    reply = session._reply(raw, expects_structured=False)
+    assert reply.is_error
+    assert reply.diagnostics[0].error_type == kind
+
+
+def test_codex_diagnostics_never_contain_error_payloads(repo: Path) -> None:
+    from dataclasses import asdict
+
+    from mergerail.backends.base import TurnDiagnostics
+
+    secret = "Bearer secret-token"
+    session = codex.CodexBackend().open_session(SessionSpec("fixer", repo))
+    reply = session._reply(
+        result(
+            {"type": "error", "message": TRANSPORT["message"] + secret},
+            {"type": secret},
+            stderr=secret,
+            returncode=1,
+        ),
+        expects_structured=False,
+    )
+    document = asdict(reply.diagnostics[0])
+    assert secret not in json.dumps(document)
+    assert TurnDiagnostics.from_dict(document) == reply.diagnostics[0]
+    document["close_reason"] = secret
+    assert TurnDiagnostics.from_dict(document) is None

@@ -697,6 +697,8 @@ def _write_result_bundle(sha: str) -> None:
 
 
 def _reply_dict(reply: Any) -> dict[str, Any]:
+    from dataclasses import asdict
+
     usage = reply.usage
     return {
         "text": reply.text,
@@ -706,6 +708,7 @@ def _reply_dict(reply: Any) -> dict[str, Any]:
         "seconds": reply.seconds,
         "structured": reply.structured,
         "session_id": reply.session_id,
+        "diagnostics": [asdict(value) for value in reply.diagnostics],
         "usage": None
         if usage is None
         else {

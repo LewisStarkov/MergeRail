@@ -84,6 +84,69 @@ class Usage:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class TurnDiagnostics:
+    """Payload-free CLI diagnostics, suitable for audit and recovery decisions."""
+
+    error_type: str
+    event_types: tuple[str, ...]
+    exit_code: int
+    close_reason: str
+
+    @classmethod
+    def from_dict(cls, value: object) -> TurnDiagnostics | None:
+        if not isinstance(value, dict):
+            return None
+        if not isinstance(value.get("error_type"), str) or not isinstance(
+            value.get("close_reason"), str
+        ):
+            return None
+        if value.get("error_type") not in {
+            "none",
+            "transport",
+            "terminal",
+            "timeout",
+            "cancelled",
+            "exit",
+            "incomplete",
+        } or value.get("close_reason") not in {
+            "completed",
+            "stream_closed_before_response_completed",
+            "transport_error",
+            "turn_failed",
+            "timeout",
+            "cancelled",
+            "process_exit",
+            "missing_completion",
+            "missing_message",
+        }:
+            return None
+        events = value.get("event_types")
+        code = value.get("exit_code")
+        if not isinstance(events, (list, tuple)) or len(events) > 64:
+            return None
+        if not isinstance(code, int) or isinstance(code, bool):
+            return None
+        if any(
+            not isinstance(event, str)
+            or event
+            not in {
+                "thread.started",
+                "turn.started",
+                "turn.completed",
+                "turn.failed",
+                "error",
+                "item.started",
+                "item.updated",
+                "item.completed",
+                "other",
+            }
+            for event in events
+        ):
+            return None
+        return cls(value["error_type"], tuple(events), code, value["close_reason"])
+
+
 @dataclass(slots=True)
 class AgentReply:
     """The normalized final result of one agent turn.
@@ -100,6 +163,7 @@ class AgentReply:
     structured: dict[str, Any] | None = None
     session_id: str | None = None
     usage: Usage | None = None
+    diagnostics: tuple[TurnDiagnostics, ...] = ()
 
 
 @runtime_checkable
@@ -146,6 +210,7 @@ __all__ = [
     "EventSink",
     "NullEventSink",
     "SessionSpec",
+    "TurnDiagnostics",
     "TurnRequest",
     "Usage",
 ]

@@ -16,6 +16,7 @@ from .base import (
     EventSink,
     NullEventSink,
     SessionSpec,
+    TurnDiagnostics,
     TurnRequest,
     Usage,
 )
@@ -155,13 +156,35 @@ class CodexSession:
         error_messages: list[str] = []
         usage: Usage | None = None
         saw_completion = False
+        transport_messages: list[str] = []
+        event_types: list[str] = []
+        close_reason = "missing_completion"
 
         for event in result.events:
             event_type = str(event.get("type") or "")
+            event_types.append(
+                event_type
+                if event_type
+                in {
+                    "thread.started",
+                    "turn.started",
+                    "turn.completed",
+                    "turn.failed",
+                    "error",
+                    "item.started",
+                    "item.updated",
+                    "item.completed",
+                }
+                else "other"
+            )
+            event_types = event_types[-64:]
             if event_type == "thread.started":
                 thread_id = _string(event.get("thread_id") or event.get("threadId"))
                 if thread_id:
                     self.session_id = thread_id
+            elif event_type == "turn.started":
+                saw_completion = False
+                text = ""
             elif event_type == "item.completed":
                 item = event.get("item")
                 if isinstance(item, dict) and item.get("type") == "agent_message":
@@ -170,19 +193,46 @@ class CodexSession:
                         text = message
             elif event_type == "turn.completed":
                 saw_completion = True
+                transport_messages.clear()
+                close_reason = "completed"
                 usage = _usage(event.get("usage")) or usage
             elif event_type in {"turn.failed", "error"}:
-                error_messages.append(_error_text(event))
+                message = _error_text(event)
+                reason = _transport_reason(message)
+                if reason:
+                    transport_messages.append(message)
+                    close_reason = reason
+                    saw_completion = False
+                else:
+                    error_messages.append(message)
+                    close_reason = "turn_failed"
+
+        error_type = "terminal" if error_messages else "transport" if transport_messages else "none"
+        if error_type == "terminal":
+            close_reason = "turn_failed"
+        error_messages.extend(transport_messages)
 
         if result.timed_out:
+            error_type, close_reason = "timeout", "timeout"
             error_messages.append(f"codex timed out after {self.spec.timeout} seconds")
         if result.cancelled:
+            error_type, close_reason = "cancelled", "cancelled"
             error_messages.append("codex turn was cancelled")
         if result.returncode != 0:
+            if error_type == "none" or (
+                result.returncode < 0 and error_type not in {"timeout", "cancelled"}
+            ):
+                reason = _transport_reason(result.stderr) if not saw_completion else None
+                error_type = "transport" if reason and result.returncode > 0 else "exit"
+                close_reason = reason if error_type == "transport" and reason else "process_exit"
             error_messages.append(result.stderr.strip() or f"codex exited with {result.returncode}")
         if not saw_completion and not error_messages:
+            reason = _transport_reason(result.stderr)
+            error_type = "transport" if reason else "incomplete"
+            close_reason = reason or "missing_completion"
             error_messages.append(result.stderr.strip() or "codex produced no completed turn")
         if saw_completion and not text and not error_messages:
+            error_type, close_reason = "incomplete", "missing_message"
             error_messages.append("codex completed without an agent message")
 
         structured = _structured(text) if expects_structured else None
@@ -202,7 +252,21 @@ class CodexSession:
             structured=structured,
             session_id=self.session_id,
             usage=usage,
+            diagnostics=(
+                TurnDiagnostics(error_type, tuple(event_types), result.returncode, close_reason),
+            ),
         )
+
+
+def _transport_reason(message: str) -> str | None:
+    value = message.lower()
+    if "stream closed before response.completed" in value:
+        return "stream_closed_before_response_completed"
+    if "websocket closed by server before response.completed" in value or value.startswith(
+        "reconnecting..."
+    ):
+        return "transport_error"
+    return None
 
 
 def _usage(value: object) -> Usage | None:

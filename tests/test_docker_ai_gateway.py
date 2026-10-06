@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import io
 import ipaddress
+import json
 import os
 import socket
 import ssl
 import time
 from email import message_from_string
+from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
@@ -57,6 +59,11 @@ def test_non_public_addresses_are_denied(literal: str) -> None:
 @pytest.mark.parametrize("literal", PUBLIC)
 def test_public_addresses_are_allowed(literal: str) -> None:
     assert gateway.is_public_unicast(ipaddress.ip_address(literal)) is True
+
+
+@pytest.fixture(autouse=True)
+def diagnostic_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gateway, "DIAGNOSTICS_PATH", str(tmp_path / "gateway.jsonl"))
 
 
 def _answer(family: int, address: str) -> tuple[Any, ...]:
@@ -705,6 +712,11 @@ def test_credentialed_upstream_errors_keep_status_and_hide_the_upstream_body(
     assert b"provider detail" not in written
     assert b"root-secret" not in written
     assert response.reads == []
+    assert json.loads(Path(gateway.DIAGNOSTICS_PATH).read_text()) == {
+        "close_reason": "upstream_http_error",
+        "status": status,
+        "bytes": 0,
+    }
 
 
 def test_failure_bodies_never_echo_the_request() -> None:
@@ -894,3 +906,16 @@ def test_main_refuses_an_invalid_credential_destination_without_logging_secrets(
     )
     assert result == 2
     assert "never-log-this-token" not in capsys.readouterr().err
+
+
+def test_gateway_close_journal_is_bounded_and_payload_free() -> None:
+    handler, _ = _handler()
+    body = b'data: {"token":"Bearer secret"}\n\n'
+    handler._relay(FakeResponse([body]))
+    path = Path(gateway.DIAGNOSTICS_PATH)
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    assert records == [{"close_reason": "upstream_eof", "status": 200, "bytes": len(body)}]
+    assert "secret" not in path.read_text()
+    for _ in range(1000):
+        gateway.record_close("transport_error")
+    assert path.stat().st_size <= 16384

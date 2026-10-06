@@ -11,6 +11,7 @@ from .base import (
     EventSink,
     NullEventSink,
     SessionSpec,
+    TurnDiagnostics,
     TurnRequest,
     Usage,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "OpenCodeSession",
     "ProtocolError",
     "SessionSpec",
+    "TurnDiagnostics",
     "TurnRequest",
     "Usage",
     "default_registry",

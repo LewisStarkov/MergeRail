@@ -744,3 +744,29 @@ def test_cancelled_backend_exception_keeps_cancelled_status(
     runner.handle(claimed)
     result = runner.store.get(task.id)
     assert result is not None and result.status == Status.CANCELLED
+
+
+@pytest.mark.parametrize("kind", ["transport", "incomplete", "timeout", "terminal"])
+def test_codex_failure_cannot_restart_with_a_fresh_session(
+    rig: tuple[Runner, FakeAgent, FakeAgent], kind: str
+) -> None:
+    from mergerail.backends.base import TurnDiagnostics
+
+    runner, fixer, _reviewer = rig
+    task = runner.store.add("continue saved changes")
+    runner.store.save_session(task.id, "fixer", backend="codex", session_id="saved-thread")
+    fixer.native_resume = True
+    failed = AgentReply(
+        "unconfirmed", True, None, 0, 1, session_id="saved-thread",
+        diagnostics=(TurnDiagnostics(kind, ("error",), 1, "transport_error"),),
+    )
+    fixer.turns = [lambda prompt: failed]
+    session, answer = runner._ask_role(
+        fixer, task, TurnRequest("continue"), role="fixer", backend="codex"
+    )
+    assert session is fixer and answer is failed
+    assert len(fixer.prompts) == 1
+    runner._audit_reply(task.id, 1, "fixer", "codex", failed)
+    records = runner.audit.read(task=task.id)
+    assert not any(row["event"] == "task.session_fallback" for row in records)
+    assert records[-1]["diagnostics"][0]["error_type"] == kind

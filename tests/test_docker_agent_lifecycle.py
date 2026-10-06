@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,9 @@ def _prime_agent_turn(
     monkeypatch.setattr(execution, "_selected_model_definition", lambda: {})
 
 
+@pytest.mark.parametrize("backend", ["opencode", "codex"])
 def test_online_fixer_turns_restore_session_archive_and_commit_only_verified_state(
+    backend: str,
     execution: DockerExecution,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -62,11 +65,14 @@ def test_online_fixer_turns_restore_session_archive_and_commit_only_verified_sta
     base_sha = "a" * 40
     reviewed_sha = "b" * 40
     recovered_heads = ["c" * 40, "d" * 40]
-    _prime_agent_turn(execution, monkeypatch, "opencode", base_sha=base_sha, head_sha=reviewed_sha)
+    _prime_agent_turn(execution, monkeypatch, backend, base_sha=base_sha, head_sha=reviewed_sha)
     events: list[str] = []
     stage_requests: list[dict[str, str]] = []
     prepared_archives: list[bytes | None] = []
     worker_requests: list[dict[str, Any]] = []
+    clock = [100.0]
+    if backend == "codex":
+        monkeypatch.setattr("mergerail.execution.docker.time.monotonic", lambda: clock[0])
     captured: list[tuple[str, bytes]] = []
     recovered_archives: list[bytes] = []
 
@@ -78,7 +84,7 @@ def test_online_fixer_turns_restore_session_archive_and_commit_only_verified_sta
         events.append("network-created")
         return "private-network"
 
-    def start_gateway(network: str) -> tuple[str, str]:
+    def start_gateway(network: str, **kwargs: Any) -> tuple[str, str]:
         assert network == "private-network"
         events.append("gateway-started")
         return "gateway-stage", "172.30.0.2"
@@ -121,9 +127,27 @@ def test_online_fixer_turns_restore_session_archive_and_commit_only_verified_sta
         assert kwargs["cancelled"]() is False
         events.append("turn-ran")
         turn = len(worker_requests)
-        return {"reply": {"text": f"turn {turn} complete", "session_id": f"session-{turn}"}}
+        return {
+            "reply": {
+                "text": f"turn {turn} complete",
+                "session_id": "session-1",
+                "is_error": backend == "codex" and turn == 1,
+                "diagnostics": [
+                    {
+                        "error_type": "transport" if turn == 1 else "none",
+                        "event_types": ["error"] if turn == 1 else ["turn.completed"],
+                        "exit_code": 1 if turn == 1 else 0,
+                        "close_reason": "transport_error" if turn == 1 else "completed",
+                    }
+                ]
+                if backend == "codex"
+                else [],
+            }
+        }
 
     def capture(_container: str, source: str, *, purpose: str) -> Path:
+        if backend == "codex":
+            clock[0] += 10
         turn = len(captured) // 2 + 1
         data = f"{purpose} checkpoint {turn}".encode()
         artifact = tmp_path / f"{purpose}-{turn}.tar"
@@ -170,19 +194,35 @@ def test_online_fixer_turns_restore_session_archive_and_commit_only_verified_sta
         lambda _name: events.append("network-removed"),
     )
     monkeypatch.setattr(execution, "_recover_workspace", recover)
+    if backend == "codex":
+        monkeypatch.setattr(
+            execution,
+            "_docker",
+            lambda *args, **kwargs: json.dumps(
+                {
+                    "close_reason": "upstream_eof",
+                    "status": 200,
+                    "bytes": len(worker_requests),
+                    "authorization": "Bearer secret",
+                }
+            ),
+        )
     session = DockerAgentSession(
         execution,
-        "opencode",
-        SessionSpec(role="fixer", cwd=Path("/work/repo")),
+        backend,
+        SessionSpec(role="fixer", cwd=Path("/work/repo"), timeout=60),
         NullEventSink(),
     )
 
     first = session.ask(TurnRequest("Implement the change"))
     first_recovery_end = len(events)
-    second = session.ask(TurnRequest("Continue the same task"))
+    second = session.ask(TurnRequest("Continue the same task")) if backend == "opencode" else first
 
     task_dir = execution._task_dir()
-    assert first.text == "turn 1 complete" and not first.is_error
+    assert (
+        first.text == ("turn 1 complete" if backend == "opencode" else "turn 2 complete")
+        and not first.is_error
+    )
     assert second.text == "turn 2 complete" and not second.is_error
     assert worker_requests[0]["resume_session_id"] is None
     assert worker_requests[1]["resume_session_id"] == "session-1"
@@ -203,7 +243,18 @@ def test_online_fixer_turns_restore_session_archive_and_commit_only_verified_sta
     assert events.index("removed-agent-stage") < events.index("checkpoint-imported-1")
     assert events.index("removed-gateway-stage") < events.index("checkpoint-imported-1")
     assert events.index("network-removed") < events.index("checkpoint-imported-1")
-    assert events[first_recovery_end:].count("lease-released") == 1
+    if backend == "opencode":
+        assert events[first_recovery_end:].count("lease-released") == 1
+    else:
+        assert len(first.diagnostics) == 2
+        assert [request["timeout"] for request in worker_requests] == [60, 40]
+        assert "do not reset or discard" in worker_requests[1]["prompt"]
+        assert events.count("lease-released") == 2
+        assert execution.metadata["codex_gateway_diagnostics"] == [
+            {"close_reason": "upstream_eof", "status": 200, "bytes": 1},
+            {"close_reason": "upstream_eof", "status": 200, "bytes": 2},
+        ]
+        assert "secret" not in json.dumps(execution.metadata)
     assert events[-1] == "lease-released"
 
 
@@ -482,3 +533,80 @@ def test_docker_backend_proxy_opens_only_virtual_repository_sessions(
     assert session.capabilities == BackendInfo("fixture", True).capabilities
     with pytest.raises(DockerExecutionError, match="virtual /work/repo checkout"):
         backend.open_session(SessionSpec(role="reviewer", cwd=Path("/tmp/project")))
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [
+        "limit",
+        "deadline",
+        "cancel",
+        "terminal",
+        "no-session",
+        "no-home",
+        "unverified",
+        "reviewer",
+        "incomplete",
+        "missing-message",
+    ],
+)
+def test_codex_resume_is_bounded(
+    execution: DockerExecution, monkeypatch: pytest.MonkeyPatch, stop: str
+) -> None:
+    from mergerail.backends.base import AgentReply, TurnDiagnostics
+
+    _prime_agent_turn(execution, monkeypatch, "codex")
+    session = DockerAgentSession(
+        execution,
+        "codex",
+        SessionSpec("reviewer" if stop == "reviewer" else "fixer", Path("/work/repo"), timeout=10),
+        NullEventSink(),
+    )
+    calls: list[float] = []
+    clock = [100.0]
+    monkeypatch.setattr("mergerail.execution.docker.time.monotonic", lambda: clock[0])
+
+    def turn(session: DockerAgentSession, request: TurnRequest, *, deadline: float) -> AgentReply:
+        calls.append(deadline)
+        session.session_id = None if stop == "no-session" else "same-thread"
+        execution._last_recovery = {"status": "unverified" if stop == "unverified" else "verified"}
+        if stop != "no-home":
+            target = execution._task_dir() / "fixer-home.tar"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"native session")
+        if stop == "deadline":
+            clock[0] = 110
+        if stop == "cancel":
+            session._cancelled.set()
+        kind = (
+            "terminal"
+            if stop == "terminal"
+            else "incomplete"
+            if stop in {"incomplete", "missing-message"}
+            else "transport"
+        )
+        reason = (
+            "missing_completion"
+            if stop == "incomplete"
+            else "missing_message"
+            if stop == "missing-message"
+            else "transport_error"
+        )
+        return AgentReply(
+            "disconnected",
+            True,
+            None,
+            0,
+            3,
+            session_id=session.session_id,
+            diagnostics=(
+                TurnDiagnostics(kind, ("error",), 0 if stop == "incomplete" else 1, reason),
+            ),
+        )
+
+    monkeypatch.setattr(execution, "_agent_turn", turn)
+    reply = session.ask(TurnRequest("fix"))
+    assert reply.is_error
+    assert len(calls) == (2 if stop in {"limit", "incomplete"} else 1)
+    assert all(deadline == 110 for deadline in calls)
+    assert reply.seconds == (6 if stop in {"limit", "incomplete"} else 3)

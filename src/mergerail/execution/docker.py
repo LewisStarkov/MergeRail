@@ -15,6 +15,7 @@ import time
 import zipfile
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -27,6 +28,7 @@ from ..backends import (
     BackendRegistry,
     EventSink,
     SessionSpec,
+    TurnDiagnostics,
     TurnRequest,
     Usage,
 )
@@ -153,6 +155,9 @@ class DockerExecution:
         value = str(task_id)
         if not _SAFE_TASK_ID.fullmatch(value) or value in {".", ".."}:
             raise DockerExecutionError("task id contains unsafe characters for Docker artifacts")
+        if self._task_id != value:
+            self._metadata.pop("codex_gateway_diagnostics", None)
+            self._metadata.pop("codex_cli_diagnostics", None)
         self._task_id = value
         self._write_metadata()
 
@@ -1154,7 +1159,13 @@ class DockerExecution:
         temporary.replace(target)
         return target
 
-    def _agent_turn(self, session: DockerAgentSession, request: TurnRequest) -> AgentReply:
+    def _agent_turn(
+        self, session: DockerAgentSession, request: TurnRequest, *, deadline: float | None = None
+    ) -> AgentReply:
+        if deadline is not None and (time.monotonic() >= deadline or session._cancelled.is_set()):
+            raise DockerExecutionError(
+                "Codex turn deadline exhausted or cancelled; checkpoint preserved"
+            )
         role = session.spec.role
         if role not in {"fixer", "reviewer"}:
             raise DockerExecutionError(f"unsupported Docker agent role: {role!r}")
@@ -1202,6 +1213,12 @@ class DockerExecution:
                 network=network or "none",
                 gateway_host=gateway_ip,
             )
+            if deadline is not None and (
+                time.monotonic() >= deadline or session._cancelled.is_set()
+            ):
+                raise DockerExecutionError(
+                    "Codex turn deadline exhausted or cancelled; checkpoint preserved"
+                )
             self._prepare_stage(
                 container,
                 base_sha,
@@ -1212,6 +1229,13 @@ class DockerExecution:
                 read_only=role == "reviewer" or session.spec.read_only,
                 home_archive=home_archive,
             )
+            turn_timeout = session.spec.timeout
+            if deadline is not None:
+                turn_timeout = min(turn_timeout, int(deadline - time.monotonic()))
+                if turn_timeout < 1 or session._cancelled.is_set():
+                    raise DockerExecutionError(
+                        "Codex turn deadline exhausted or cancelled; checkpoint preserved"
+                    )
             worker_request = {
                 "mode": "turn",
                 "backend": session.backend_name,
@@ -1228,7 +1252,7 @@ class DockerExecution:
                 "model_definition": model_definition,
                 "effort": session.spec.effort,
                 "settings": dict(session.spec.settings),
-                "timeout": session.spec.timeout,
+                "timeout": turn_timeout,
                 "context_limit": session.spec.context_limit,
                 "resume_session_id": session.session_id,
                 "gateway": gateway,
@@ -1236,7 +1260,7 @@ class DockerExecution:
                 "codex_auth": self.policy.codex_auth,
                 "max_bundle_bytes": self.policy.max_bundle_mib * MIB,
             }
-            timeout = max(30, float(session.spec.timeout) + 30)
+            timeout = max(30, float(turn_timeout) + 30)
             with self._active_lock:
                 self._active_container = container
             result = self._worker(
@@ -1251,6 +1275,52 @@ class DockerExecution:
             raw_reply = result.get("reply")
             if not isinstance(raw_reply, dict):
                 raise DockerExecutionError("Docker agent returned no normalized reply")
+            if session.backend_name == "codex":
+                previous = self._metadata.get("codex_cli_diagnostics", [])
+                diagnostics = [
+                    asdict(value) for value in self._reply_from_dict(raw_reply).diagnostics
+                ]
+                self._metadata["codex_cli_diagnostics"] = (previous + diagnostics)[-16:]
+            if session.backend_name == "codex" and gateway_container:
+                with suppress(DockerExecutionError, ValueError):
+                    payload = self._docker(
+                        "exec",
+                        "--user",
+                        "0:0",
+                        gateway_container,
+                        "python3",
+                        "-I",
+                        "-c",
+                        "from pathlib import Path; "
+                        "p=Path('/tmp/mergerail-gateway-diagnostics.jsonl'); "
+                        "print(p.open('rb').read(16384).decode() if p.exists() else '')",
+                        timeout=5,
+                    )
+                    diagnostics = []
+                    for line in payload.splitlines()[-16:]:
+                        record = json.loads(line)
+                        if (
+                            isinstance(record, dict)
+                            and record.get("close_reason")
+                            in (
+                                "upstream_eof",
+                                "transport_error",
+                                "timeout",
+                                "size_limit",
+                                "upstream_http_error",
+                            )
+                            and type(record.get("status")) is int
+                            and type(record.get("bytes")) is int
+                        ):
+                            diagnostics.append(
+                                {
+                                    "close_reason": record["close_reason"],
+                                    "status": record["status"],
+                                    "bytes": record["bytes"],
+                                }
+                            )
+                    previous = self._metadata.get("codex_gateway_diagnostics", [])
+                    self._metadata["codex_gateway_diagnostics"] = (previous + diagnostics)[-32:]
             if role == "fixer":
                 # The trusted exporter stops and kills every untrusted peer
                 # before streaming either mutable tmpfs tree.
@@ -2117,6 +2187,13 @@ class DockerExecution:
             structured=raw.get("structured") if isinstance(raw.get("structured"), dict) else None,
             session_id=raw.get("session_id") if isinstance(raw.get("session_id"), str) else None,
             usage=usage,
+            diagnostics=tuple(
+                diagnostic
+                for value in raw.get("diagnostics", [])[:2]
+                if (diagnostic := TurnDiagnostics.from_dict(value)) is not None
+            )
+            if isinstance(raw.get("diagnostics"), list)
+            else (),
         )
 
 
@@ -2244,7 +2321,50 @@ class DockerAgentSession:
         if self._closed:
             return AgentReply("Docker agent session is closed", True, None, 0, 0.0)
         self._cancelled.clear()
-        return self.execution._agent_turn(self, request)
+        if self.backend_name != "codex":
+            return self.execution._agent_turn(self, request)
+        deadline = time.monotonic() + self.spec.timeout
+        reply = self.execution._agent_turn(self, request, deadline=deadline)
+        if (
+            self.spec.role != "fixer"
+            or not reply.is_error
+            or not self.session_id
+            or not reply.diagnostics
+            or not (
+                reply.diagnostics[-1].error_type == "transport"
+                or (
+                    reply.diagnostics[-1].error_type == "incomplete"
+                    and reply.diagnostics[-1].close_reason == "missing_completion"
+                    and reply.diagnostics[-1].exit_code == 0
+                )
+            )
+            or self._cancelled.is_set()
+            or deadline - time.monotonic() < 1
+            or self.execution._last_recovery.get("status") != "verified"
+            or not (self.execution._task_dir() / "fixer-home.tar").is_file()
+        ):
+            return reply
+        self.execution._phase(
+            "resuming-checkpoint", role="fixer", reason=reply.diagnostics[-1].close_reason
+        )
+        resumed = self.execution._agent_turn(
+            self,
+            TurnRequest(
+                "The previous CLI stream disconnected. Your verified Git checkpoint and native "
+                "session have been restored. Continue the same task from the existing changes; "
+                "do not reset or discard them. Confirm completion, or finish any remaining work. "
+                "MergeRail will run its checks and independent review afterwards.\n\n"
+                + request.prompt,
+                schema=request.schema,
+                max_cost_usd=request.max_cost_usd,
+            ),
+            deadline=deadline,
+        )
+        return replace(
+            resumed,
+            seconds=reply.seconds + resumed.seconds,
+            diagnostics=reply.diagnostics + resumed.diagnostics,
+        )
 
     def cancel(self) -> None:
         self._cancelled.set()

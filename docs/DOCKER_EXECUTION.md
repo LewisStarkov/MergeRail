@@ -100,6 +100,26 @@ At the end of a turn, a container helper stops and terminates remaining task pro
 
 ## Delivery and recovery
 
+A Codex turn requires CLI `turn.completed`, a final agent message, and a zero
+exit code. A later completion clears earlier known transport errors; terminal
+errors remain failures. Native session `task_complete` records alone do not
+confirm CLI completion. If a stream failure remains unresolved, or the CLI exits
+with code 0 without `turn.completed`, MergeRail verifies and saves the fixer
+checkpoint and home, then makes at most one `resume` call to the same session
+when its ID and home are available. Both calls share the original agent timeout;
+checkpoint export, validation, and container cleanup finish safely even if that
+budget expires, and no further agent call starts after expiry. Cancellation,
+authentication failures, and other terminal errors do not trigger this recovery.
+An exhausted retry remains failed with its checkpoint preserved. A recovered
+result must pass the configured checks and independent review before approval
+or delivery; saving a checkpoint never creates a deployment request.
+
+The `agent.turn` audit record contains bounded, payload-free CLI diagnostics for
+each invocation: event types in order, error category, exit code, and close
+reason. Gateway EOF status/byte counts and transport failures are saved in
+execution metadata when available. Headers, credentials, upstream bodies, and
+raw error details are excluded from these diagnostic fields.
+
 MergeRail saves the reviewed commit and execution policy with the task. Local integration and its checks run in another sandbox. Delivery applies the exact validated candidate with Git reference and index locks; a dirty checkout, moved branch, or conflicting untracked file blocks delivery and preserves the result branch. A delivery retry uses the saved approved commit, without running the fixer again. A changed execution policy blocks that retry until the original policy is restored or the task is retried from the beginning.
 
 Task history and the web UI expose the Docker backend, phase, base/result SHAs, validation state, and recovery information. A durable checkpoint can be restored after interruption. Changes made after the last successfully exported checkpoint may be lost. Interrupted host checkout uses a journal and only releases locks with recorded ownership; unexpected local edits or unknown locks require inspection instead of automatic overwriting. A crash between Git preparing a reference transaction and MergeRail recording its lock identities also requires inspection; recovery preserves those unknown locks.
@@ -111,7 +131,7 @@ The feature does not provide host-mounted previews, arbitrary network access, se
 The regular Python suite covers policy and protocol validation. Real engine tests are opt-in:
 
 ```sh
-MERGERAIL_TEST_DOCKER_IMAGE=sha256:YOUR_IMAGE_ID pytest tests/test_docker_integration.py
+MERGERAIL_TEST_DOCKER_IMAGE=sha256:YOUR_IMAGE_ID pytest tests/test_docker_integration.py tests/test_docker_codex_recovery.py
 ```
 
 They exercise a fixer, destructive check side effects, an enforced read-only reviewer, exact local delivery, failure preservation, and delivery retry. Online provider validation additionally requires the model catalogue and a reachable fixed upstream.

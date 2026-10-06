@@ -26,6 +26,7 @@ import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -826,6 +827,7 @@ class Runner:
         if not (
             reply is not None
             and reply.is_error
+            and not (backend == "codex" and reply.diagnostics)
             and session.capabilities.native_resume
             and saved is not None
             and saved.backend == backend
@@ -962,6 +964,7 @@ class Runner:
             input_tokens=usage.input_tokens if usage else None,
             output_tokens=usage.output_tokens if usage else None,
             session_id=reply.session_id,
+            diagnostics=[asdict(value) for value in reply.diagnostics],
         )
 
     def _decision_of(self, verdict: AgentReply) -> tuple[bool | None, str]:
