@@ -435,7 +435,6 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--outbox", type=Path, required=True)
     parser.add_argument("--state", type=Path, required=True)
-    parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     deployer = DevBotDeployer(args.outbox, args.state)
     logger = logging.getLogger("mergerail.devbot-deploy")
@@ -453,10 +452,6 @@ def main() -> None:
                 deployer.tick()
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 logger.exception("deployment queue blocked; saved result retained")
-                if args.once:
-                    raise
-            if args.once:
-                return
             time.sleep(3)
     finally:
         deployer.lease.release()
