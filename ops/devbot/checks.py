@@ -43,4 +43,10 @@ subprocess.run(
     check=True,
     timeout=300,
 )
-subprocess.run([python, "-m", "pytest", "-q"], cwd=root, env=env, check=True, timeout=900)
+subprocess.run(
+    [python, "-m", "pytest", "-q", "--tb=short", "--disable-warnings"],
+    cwd=root,
+    env=env,
+    check=True,
+    timeout=900,
+)
