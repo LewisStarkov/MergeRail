@@ -150,6 +150,55 @@ def test_failure_recovers_previous_and_explicit_retry_uses_same_sha(
     assert "failed" in states and states[-1] == "succeeded"
 
 
+@pytest.mark.parametrize("candidate_healthy", [False, True])
+def test_restart_after_cpd_promotion_preserves_working_rollback_target(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, candidate_healthy: bool
+) -> None:
+    front, task, directory = publication(repo, monkeypatch)
+    request = read_record(directory / "request.json")
+    worker = deployer(repo, front.outbox, monkeypatch)
+    previous = request["base_sha"]
+    worker.write_status(directory, request, status="running", previous_sha=previous)
+    live = {"sha": task.approved_sha}
+    calls: list[list[str]] = []
+
+    def wrapper(command: list[str], _: Path) -> int:
+        calls.append(command)
+        if "rollback.sh" in " ".join(command):
+            assert command[3] == previous
+            assert command[-1] == task.approved_sha
+            live["sha"] = previous
+            return 0
+        assert command[command.index("--expected-previous-sha") + 1] == task.approved_sha
+        return 1
+
+    monkeypatch.setattr(worker, "run_wrapper", wrapper)
+    monkeypatch.setattr(worker, "verified", lambda: live["sha"])
+    monkeypatch.setattr(worker, "remote", lambda _: live["sha"])
+    monkeypatch.setattr(worker, "healthy", lambda sha: candidate_healthy or sha == previous)
+    worker.deploy(directory)
+    record = read_record(directory / "status.json")
+    assert record["previous_sha"] == previous
+    assert record["status"] == ("succeeded" if candidate_healthy else "failed")
+    assert live["sha"] == (task.approved_sha if candidate_healthy else previous)
+    assert len(calls) == (0 if candidate_healthy else 2)
+
+
+@pytest.mark.parametrize("previous", [None, "invalid"])
+def test_interrupted_rollout_without_saved_previous_blocks_queue(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, previous: str | None
+) -> None:
+    front, task, directory = publication(repo, monkeypatch)
+    request = read_record(directory / "request.json")
+    worker = deployer(repo, front.outbox, monkeypatch)
+    worker.write_status(directory, request, status="running", previous_sha=previous)
+    monkeypatch.setattr(worker, "verified", lambda: task.approved_sha)
+    monkeypatch.setattr(worker, "run_wrapper", lambda *_: pytest.fail("unknown recovery target"))
+    with pytest.raises(RuntimeError, match="saved previous SHA"):
+        worker.tick()
+    assert read_record(directory / "status.json")["status"] == "blocked"
+
+
 @pytest.mark.parametrize(
     "name",
     [

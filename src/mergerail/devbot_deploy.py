@@ -311,8 +311,8 @@ class DevBotDeployer:
             return
         if current != sha and current != request["base_sha"]:
             raise ValueError("main changed since review; preserved result requires a new review")
-        previous = self.verified()
-        if previous != sha and is_ancestor(self.root, sha, previous):
+        observed = self.verified()
+        if observed != sha and is_ancestor(self.root, sha, observed):
             self.write_status(
                 directory,
                 request,
@@ -321,16 +321,28 @@ class DevBotDeployer:
                 error="a newer result is already verified on DevBot",
             )
             return
-        if not is_ancestor(self.root, previous, sha):
+        if not is_ancestor(self.root, observed, sha):
             raise ValueError("verified DevBot release is outside the reviewed ancestry")
-        if self.verified() == sha and self.healthy(sha):
+        previous = observed
+        if old.get("status") == "running":
+            # CPD may already have promoted the candidate before the adapter
+            # stopped. Its marker is not the previously working rollback target.
+            previous = str(old.get("previous_sha", ""))
+            if (
+                not re.fullmatch(r"[a-f0-9]{40}", previous)
+                or previous == sha
+                or not is_ancestor(self.root, previous, sha)
+            ):
+                raise RuntimeError("interrupted rollout has no valid saved previous SHA")
+            if observed not in {previous, sha}:
+                raise RuntimeError("DevBot changed during the interrupted rollout")
+            # An interrupted adapter must wait for the SSH rollout process to exit.
+            self.remote("set -eu\nflock -n /opt/rivals-dev-config/deploy.lock true\n")
+        if observed == sha and self.healthy(sha):
             self.write_status(
                 directory, request, status="succeeded", previous_sha=previous, retry_id=retry_id
             )
             return
-        if old.get("status") == "running":
-            # An interrupted adapter must wait for the SSH rollout process to exit.
-            self.remote("set -eu\nflock -n /opt/rivals-dev-config/deploy.lock true\n")
         if current != sha:
             _apply_candidate(
                 self.root, self.state, int(request["task_id"]), "refs/heads/main", current, sha
@@ -350,7 +362,7 @@ class DevBotDeployer:
                 "--allow-dirty",
                 "--prebuilt-only",
                 "--expected-previous-sha",
-                previous,
+                observed,
                 "--expected-sha",
                 sha,
             ],
