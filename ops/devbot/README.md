@@ -107,9 +107,13 @@ prevent infrastructure/schema changes; the agent reviewer also evaluates
 product scope. Changing that scope requires an explicit operator decision.
 
 After CPD verifies the candidate, the adapter checks public `/health` against
-the full SHA. On failure it records actual dev container state and calls the
+the full SHA, using CPD's `Rivals-Deploy/1.0` User-Agent. HTTP failures retain
+their status code in the deployment record. On failure it records actual dev container state and calls the
 existing schema/database-guarded rollback, comparing the observed current SHA
-under the same deployment lock. A concurrent newer release is preserved. Image transport is limited to 1800 seconds and server import to 600 seconds;
+under the same deployment lock. The checked rollback helper is transferred
+completely, checksum-verified, and run with stdin closed before Docker starts;
+attached Docker commands cannot consume the remaining helper source.
+A concurrent newer release is preserved. Image transport is limited to 1800 seconds and server import to 600 seconds;
 failed staging archives and temporary VM image tags are cleaned. CPD/rollback
 have a 1800-second observation deadline. If it expires, the remote process is
 left active and the queue becomes `blocked` for inspection.
@@ -158,7 +162,8 @@ release whose migration inputs and bot configuration remain compatible:
 
 ```bash
 cd /Users/lama/Documents/dev/rivals
-bash scripts/rollback.sh development <full-previous-sha>
+bash scripts/rollback.sh development <full-previous-sha> \
+  --expected-current-sha <full-current-verified-sha>
 ```
 
 For a controller rollback, restore the saved private `runtime.env` pins and

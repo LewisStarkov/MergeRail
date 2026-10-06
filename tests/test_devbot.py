@@ -318,3 +318,34 @@ def test_health_requires_bounded_matching_revision(
 
     monkeypatch.setattr("mergerail.devbot_deploy.urllib.request.urlopen", respond)
     assert probe_health("a" * 40) == expected
+
+
+@pytest.mark.parametrize("exposes_sha", [False, True])
+def test_rollback_health_revision_follows_target_compose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exposes_sha: bool
+) -> None:
+    import subprocess
+
+    sha, tag = "a" * 40, "b" * 20
+    release = tmp_path / "release"
+    release.mkdir()
+    (release / ".release.env").write_text(f"APP_TAG={tag}\nRIVALS_RELEASE_SHA={sha}\n")
+    (release / "compose.prod.yml").write_text(
+        "RIVALS_APP_REVISION: ${RIVALS_RELEASE_SHA:-${APP_TAG}}"
+        if exposes_sha
+        else "RIVALS_APP_REVISION: ${APP_TAG}"
+    )
+    monkeypatch.setattr("mergerail.devbot_deploy.CHECKOUT", tmp_path)
+    worker = DevBotDeployer(tmp_path / "outbox", tmp_path / "state", tmp_path)
+
+    def remote(script: str) -> str:
+        return subprocess.check_output(
+            ["sh", "-c", script.replace(f"/opt/rivals-dev-releases/{sha}", str(release))],
+            text=True,
+        ).strip()
+
+    monkeypatch.setattr(worker, "remote", remote)
+    monkeypatch.setattr(
+        worker, "healthy", lambda revision: revision == (sha if exposes_sha else tag)
+    )
+    assert worker.healthy_release(sha)
