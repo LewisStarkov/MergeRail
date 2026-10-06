@@ -3,6 +3,8 @@
 DevBot is the existing `@rivalsgamedevbot` at `https://dev.rivals.baby`.
 The integration calls `scripts/cpd-dev.sh`, not a new bot API. Ordinary reviewed
 tasks deploy automatically to this development environment only.
+[Recorded end-to-end verification](VERIFICATION.md) covers actual deployment,
+health rejection, rollback, retry, access controls and restart recovery.
 
 ## Trust boundary
 
@@ -89,6 +91,8 @@ There is no published origin port. UI, API and SSE require the same authenticate
 session. Cookies are HttpOnly, SameSite=Strict and Secure over HTTPS; SSE
 rechecks session validity and sends a fresh snapshot on reconnect. Inspection
 of ngrok requests is disabled. The password is not printed in logs.
+The generated ngrok hostname can change after a controller/tunnel restart;
+retrieve the new HTTPS URL from the controller log.
 
 ## Deployment and recovery
 
