@@ -169,8 +169,10 @@ paths. Never run Docker prune or operate on other projects' resources.
 Update only while no task/build/deployment is active. Stop the adapter and
 controller with the commands below first; preparation refuses a running controller.
 Images receive permanent digest tags before convenience tags move. Save `runtime.env`, rebuild
-with `prepare.py`, and reinstall the service snapshot with `install-service.py`, then restart. An image/policy change invalidates
-pending approvals; retain the original image/config to recover them or obtain
+with `prepare.py`, and reinstall the service snapshot with `install-service.py`, then restart.
+For controller source changes with an unchanged worker Dockerfile, use
+`prepare.py --controller-only` to retain the recorded worker image.
+An image/policy change invalidates pending approvals; retain the original image/config to recover them or obtain
 a new review. Preparation never resets an existing project volume.
 
 ```bash

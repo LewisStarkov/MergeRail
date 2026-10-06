@@ -1,5 +1,6 @@
 """Build operator-owned images and seed a dedicated Engine from checked Git objects."""
 
+import argparse
 import os
 import secrets
 import shutil
@@ -10,6 +11,11 @@ SOURCE = Path(__file__).resolve().parents[2]
 RIVALS = Path("/Users/lama/Documents/dev/rivals")
 RUNTIME = Path("/Users/lama/.local/share/mergerail-devbot")
 ENGINE = ["docker", "--context", "colima-mergerail-devbot"]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--controller-only", action="store_true", help="retain the recorded worker image"
+)
+args = parser.parse_args()
 
 
 def run(*args: str) -> str:
@@ -25,6 +31,9 @@ if running.returncode == 0 and running.stdout.strip() == "true":
     raise SystemExit("Stop the controller before updating images; active approvals need their pins")
 # Keep existing immutable references before moving the convenience :checked tags.
 previous = RUNTIME / "runtime.env"
+values: dict[str, str] = {}
+if args.controller_only and not previous.exists():
+    raise SystemExit("Controller-only updates require recorded immutable images")
 if previous.exists():
     values = dict(line.split("=", 1) for line in previous.read_text().splitlines() if "=" in line)
     for role in ("worker", "controller"):
@@ -80,6 +89,8 @@ for name in (
 shutil.copyfile(SOURCE / "ops/devbot/worker.Dockerfile", worker / "Dockerfile")
 shutil.copyfile(SOURCE / "ops/devbot/checks.py", worker / "checks.py")
 for name, context in (("worker", worker), ("controller", controller)):
+    if args.controller_only and name == "worker":
+        continue
     subprocess.run(
         [
             *ENGINE,
@@ -93,9 +104,9 @@ for name, context in (("worker", worker), ("controller", controller)):
         timeout=1800,
     )
 images = {
-    name: run(
-        *ENGINE, "image", "inspect", f"mergerail-devbot-{name}:checked", "--format", "{{.Id}}"
-    )
+    name: values["MERGERAIL_WORKER_IMAGE"]
+    if args.controller_only and name == "worker"
+    else run(*ENGINE, "image", "inspect", f"mergerail-devbot-{name}:checked", "--format", "{{.Id}}")
     for name in ("worker", "controller")
 }
 for role, image in images.items():

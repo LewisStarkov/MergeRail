@@ -34,7 +34,7 @@ def test_codex_fixer_resume_readonly_review_and_checks(repo: Path) -> None:
         execution.worktree.reset("mergerail/codex-acceptance", base)
         fixer = execution.registry().open_session(
             "codex",
-            SessionSpec("fixer", Path("/work/repo"), model=MODEL, timeout=180),
+            SessionSpec("fixer", Path("/work/repo"), model=MODEL, effort="high", timeout=180),
         )
         first = fixer.ask(
             TurnRequest(
@@ -76,7 +76,14 @@ def test_codex_fixer_resume_readonly_review_and_checks(repo: Path) -> None:
         assert passed, report
         reviewer = execution.registry().open_session(
             "codex",
-            SessionSpec("reviewer", Path("/work/repo"), read_only=True, model=MODEL, timeout=180),
+            SessionSpec(
+                "reviewer",
+                Path("/work/repo"),
+                read_only=True,
+                model=MODEL,
+                effort="high",
+                timeout=180,
+            ),
         )
         reviewed = reviewer.ask(
             TurnRequest(

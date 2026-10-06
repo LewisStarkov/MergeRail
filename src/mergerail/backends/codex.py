@@ -99,13 +99,12 @@ class CodexSession:
         return CAPABILITIES
 
     def command(self, prompt: str, *, schema_path: Path | None = None) -> list[str]:
-        args = [
-            *self._executable,
-            "exec",
-            "--json",
-            "--color",
-            "never",
-        ]
+        args = list(self._executable)
+        if self.spec.effort:
+            # Keep all overrides before exec: its own -c can replace global overrides.
+            effort = self.spec.effort.replace("\\", "\\\\").replace('"', '\\"')
+            args += ["--config", f'model_reasoning_effort="{effort}"']
+        args += ["exec", "--json", "--color", "never"]
         read_only = self.spec.read_only or self.spec.role == "reviewer"
         if self._sandboxed_externally or (self.spec.permission == "skip" and not read_only):
             args.append("--dangerously-bypass-approvals-and-sandbox")
@@ -114,10 +113,6 @@ class CodexSession:
         args += ["--cd", str(self.spec.cwd)]
         if self.spec.model:
             args += ["--model", self.spec.model]
-        if self.spec.effort:
-            # This is a command-line config override, not a user config edit.
-            effort = self.spec.effort.replace("\\", "\\\\").replace('"', '\\"')
-            args += ["--config", f'model_reasoning_effort="{effort}"']
         if schema_path is not None:
             args += ["--output-schema", str(schema_path)]
         if self.session_id:

@@ -25,7 +25,8 @@ def test_codex_maps_roles_models_effort_and_resume(repo: Path) -> None:
         )
     )
     command = session.command("inspect")
-    assert command[:3] == ["fake-codex", "exec", "--json"]
+    assert command[:3] == ["fake-codex", "--config", 'model_reasoning_effort="high"']
+    assert "--config" not in command[command.index("exec") :]
     assert command[command.index("--sandbox") + 1] == "read-only"
     assert command[command.index("--model") + 1] == "gpt-test"
     assert 'model_reasoning_effort="high"' in command
