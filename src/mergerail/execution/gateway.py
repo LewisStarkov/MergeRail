@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import ipaddress
+import json
 import os
 import re
 import signal
@@ -37,6 +38,9 @@ UPSTREAM_TOTAL_TIMEOUT = 600.0
 MAX_CONCURRENT_REQUESTS = 2
 LISTEN_BACKLOG = 8
 UPSTREAM_PORT = 443
+MAX_CREDENTIAL_FILE_BYTES = 64 * 1024
+MAX_AUTHORIZATION_LENGTH = 8 * 1024
+MAX_ACCOUNT_ID_LENGTH = 256
 
 FORWARDED_HEADERS = (
     "accept",
@@ -65,6 +69,7 @@ CONTENT_LENGTH = re.compile(r"(?:0|[1-9][0-9]{0,9})")
 HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 HOSTNAME = re.compile(r"[a-z0-9.-]+")
 PREFIX_SEGMENT = re.compile(r"[A-Za-z0-9._~-]+")
+BEARER_AUTHORIZATION = re.compile(r"Bearer [A-Za-z0-9._~+/\-]+=*")
 
 # Denied explicitly instead of relying only on is_global, whose coverage differs
 # between Python releases. Cloud metadata lives in link-local, CGNAT, ULA and NAT64
@@ -244,6 +249,77 @@ def build_routes(prefix: str) -> dict[str, Route]:
     return {prefix + path: Route(method, prefix + path, path[1:]) for method, path in ROUTES}
 
 
+def validate_credentials(value: object) -> dict[str, str]:
+    """Validate the small credential object without including its values in errors."""
+
+    if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
+        raise ConfigError("credentials must be a JSON object")
+    if set(value) - {"authorization", "chatgpt-account-id"}:
+        raise ConfigError("credentials contain an unknown field")
+    authorization = value.get("authorization")
+    if (
+        not isinstance(authorization, str)
+        or len(authorization) > MAX_AUTHORIZATION_LENGTH
+        or not BEARER_AUTHORIZATION.fullmatch(authorization)
+    ):
+        raise ConfigError("credentials require a valid Bearer authorization value")
+    result = {"authorization": authorization}
+    if "chatgpt-account-id" in value:
+        account_id = value["chatgpt-account-id"]
+        if (
+            not isinstance(account_id, str)
+            or not account_id
+            or len(account_id) > MAX_ACCOUNT_ID_LENGTH
+            or not account_id.isascii()
+            or not is_header_value_safe(account_id)
+            or account_id != account_id.strip()
+        ):
+            raise ConfigError("credentials contain an invalid ChatGPT account ID")
+        result["chatgpt-account-id"] = account_id
+    return result
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate credential keys instead of silently choosing one."""
+
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ConfigError("credentials contain a duplicate field")
+        result[key] = value
+    return result
+
+
+def load_credentials(path: str) -> dict[str, str]:
+    """Load a bounded JSON credential file without exposing contents in errors."""
+
+    try:
+        with open(path, "rb") as source:
+            payload = source.read(MAX_CREDENTIAL_FILE_BYTES + 1)
+    except OSError:
+        raise ConfigError("cannot read credentials file") from None
+    if len(payload) > MAX_CREDENTIAL_FILE_BYTES:
+        raise ConfigError("credentials file is too large")
+    try:
+        document = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ConfigError("credentials file is malformed") from None
+    return validate_credentials(document)
+
+
+def validate_credential_destination(host: str, prefix: str) -> None:
+    """Allow only the two fixed OpenAI credential destinations."""
+
+    if (host, prefix) not in {
+        ("api.openai.com", "/v1"),
+        ("chatgpt.com", "/backend-api/codex"),
+    }:
+        raise ConfigError(
+            "credential mode requires api.openai.com with /v1 or "
+            "chatgpt.com with /backend-api/codex"
+        )
+
+
 def resolve_route(routes: Mapping[str, Route], method: str, target: str) -> Route:
     """Match the raw request target against the fixed table, byte for byte."""
 
@@ -265,7 +341,9 @@ def check_host(message: Message, allowed: Sequence[str]) -> None:
         raise RequestError(400, "host header does not name this gateway")
 
 
-def collect_headers(message: Message, allowed: Sequence[str]) -> dict[str, str]:
+def collect_headers(
+    message: Message, allowed: Sequence[str], *, credentialed: bool = False
+) -> dict[str, str]:
     """Return the only client headers allowed to reach the upstream."""
 
     check_host(message, allowed)
@@ -276,7 +354,8 @@ def collect_headers(message: Message, allowed: Sequence[str]) -> dict[str, str]:
     if "upgrade" in (message.get("Connection") or "").lower():
         raise RequestError(400, "connection upgrade is not allowed")
     forwarded: dict[str, str] = {}
-    for name in FORWARDED_HEADERS:
+    allowed_headers = ("accept", "content-type") if credentialed else FORWARDED_HEADERS
+    for name in allowed_headers:
         values = message.get_all(name) or []
         if len(values) > 1:
             raise RequestError(400, f"duplicate {name} header")
@@ -306,7 +385,11 @@ def parse_content_length(values: Sequence[str]) -> int:
 
 
 def build_upstream_headers(
-    host: str, forwarded: Mapping[str, str], length: int
+    host: str,
+    forwarded: Mapping[str, str],
+    length: int,
+    *,
+    credentials: Mapping[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """Build the complete upstream header list; nothing else is ever sent."""
 
@@ -315,7 +398,21 @@ def build_upstream_headers(
         ("Content-Length", str(length)),
         ("Accept-Encoding", "identity"),
     ]
-    headers.extend(forwarded.items())
+    if credentials is None:
+        headers.extend(forwarded.items())
+    else:
+        headers.extend(
+            (name, value) for name, value in forwarded.items() if name in {"accept", "content-type"}
+        )
+        headers.extend(
+            (
+                ("Authorization", credentials["authorization"]),
+                ("OpenAI-Beta", "responses=experimental"),
+            )
+        )
+        account_id = credentials.get("chatgpt-account-id")
+        if host == "chatgpt.com" and account_id is not None:
+            headers.extend((("chatgpt-account-id", account_id), ("originator", "codex_cli_rs")))
     return headers
 
 
@@ -492,7 +589,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
         try:
             route = resolve_route(self.server.routes, method, self.path)
             self._route_name = route.name
-            headers = collect_headers(self.headers, self.server.allowed_hosts)
+            headers = collect_headers(
+                self.headers,
+                self.server.allowed_hosts,
+                credentialed=self.server.credentials is not None,
+            )
             length = parse_content_length(self.headers.get_all("Content-Length") or [])
             if route.method == "GET" and length:
                 raise RequestError(400, "a body is not allowed for this endpoint")
@@ -542,7 +643,12 @@ class GatewayHandler(BaseHTTPRequestHandler):
             connection.putrequest(
                 route.method, route.path, skip_host=True, skip_accept_encoding=True
             )
-            for name, value in build_upstream_headers(upstream.host, headers, len(body)):
+            for name, value in build_upstream_headers(
+                upstream.host,
+                headers,
+                len(body),
+                credentials=self.server.credentials,
+            ):
                 connection.putheader(name, value)
             connection.endheaders(body)
             self._relay(connection.getresponse())
@@ -553,6 +659,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
     def _relay(self, response: HTTPResponse) -> None:
         """Stream the response in bounded blocks; abort rather than grow."""
 
+        if self.server.credentials is not None and response.status >= 400:
+            message = (
+                "upstream authentication failed; please sign in again"
+                if response.status in {401, 403}
+                else f"upstream request failed (HTTP {response.status}); "
+                "check model and account limits"
+            )
+            self._fail(response.status, message)
+            return
         headers = build_response_headers(response.status, response.headers)
         self.send_response(response.status)
         for name, value in headers.items():
@@ -609,9 +724,28 @@ class GatewayServer(HTTPServer):
         upstream: Upstream,
         routes: Mapping[str, Route],
         context: ssl.SSLContext,
+        *,
+        credentials: Mapping[str, str] | None = None,
     ) -> None:
         self.upstream = upstream
-        self.routes = routes
+        self.credentials = None if credentials is None else validate_credentials(credentials)
+        if self.credentials is None:
+            self.routes = routes
+        else:
+            response_routes = {
+                target: route
+                for target, route in routes.items()
+                if target == route.path and route.method == "POST" and route.name == "responses"
+            }
+            if len(response_routes) != 1:
+                raise ConfigError("credential mode requires one fixed responses route")
+            route = next(iter(response_routes.values()))
+            suffix = "/responses"
+            if not route.path.endswith(suffix):
+                raise ConfigError("credential mode requires one fixed responses route")
+            prefix = validate_prefix(route.path[: -len(suffix)])
+            validate_credential_destination(upstream.host, prefix)
+            self.routes = response_routes
         self.context = context
         self.allowed_hosts: tuple[str, ...] = ()
         self.authority = ""
@@ -699,11 +833,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--ca-file", default=None, help="optional additional CA bundle for the pinned upstream"
     )
+    parser.add_argument(
+        "--credentials-file",
+        default=None,
+        help="optional root-controlled JSON file for fixed OpenAI credentials",
+    )
     args = parser.parse_args(argv)
     try:
         check_proxy_environment(os.environ)
-        upstream = pin_upstream(validate_upstream_host(args.upstream_host))
-        routes = build_routes(validate_prefix(args.upstream_prefix))
+        host = validate_upstream_host(args.upstream_host)
+        prefix = validate_prefix(args.upstream_prefix)
+        credentials = (
+            load_credentials(args.credentials_file) if args.credentials_file is not None else None
+        )
+        if credentials is not None:
+            validate_credential_destination(host, prefix)
+        upstream = pin_upstream(host)
+        routes = build_routes(prefix)
         bind = validate_bind(args.bind)
         if not 0 < args.port < 65536:
             raise ConfigError("port must be between 1 and 65535")
@@ -713,11 +859,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     log(f"pinned upstream {upstream.host} to {upstream.address}")
     try:
-        server = GatewayServer(bind, args.port, upstream, routes, context)
+        server = GatewayServer(bind, args.port, upstream, routes, context, credentials=credentials)
+    except ConfigError as error:
+        log(f"refusing to start: {error}")
+        return 2
     except OSError as error:
         log(f"cannot listen: {type(error).__name__}")
         return 1
-    log(f"listening on {server.authority} for {len(routes)} fixed routes")
+    log(f"listening on {server.authority} for {len(server.routes)} fixed routes")
 
     def stop(number: int, frame: object) -> None:
         stop_on_signal(server, number)

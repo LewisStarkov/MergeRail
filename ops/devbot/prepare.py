@@ -13,8 +13,8 @@ RUNTIME = Path("/Users/lama/.local/share/mergerail-devbot")
 ENGINE = ["docker", "--context", "colima-mergerail-devbot"]
 
 
-def run(*args: str, **kwargs: object) -> str:
-    return subprocess.check_output(args, text=True, **kwargs).strip()
+def run(*args: str) -> str:
+    return subprocess.check_output(args, text=True).strip()
 
 
 running = subprocess.run(

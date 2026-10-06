@@ -143,6 +143,9 @@ def test_restore_home_keeps_task_files_but_excludes_opencode_config(
         [
             ("session.json", b'{"turn": 3}'),
             (".opencode/opencode.json", b'{"plugin": ["unexpected"]}'),
+            (".codex/auth.json", b'{"tokens": "unexpected"}'),
+            (".codex/config.toml", b'model_provider="unexpected"'),
+            (".codex/sessions/thread.jsonl", b'{"turn": 3}'),
         ],
     )
 
@@ -150,6 +153,9 @@ def test_restore_home_keeps_task_files_but_excludes_opencode_config(
 
     assert (worker_paths.home / "session.json").read_bytes() == b'{"turn": 3}'
     assert not (worker_paths.home / ".opencode").exists()
+    assert not (worker_paths.home / ".codex/auth.json").exists()
+    assert not (worker_paths.home / ".codex/config.toml").exists()
+    assert (worker_paths.home / ".codex/sessions/thread.jsonl").read_bytes() == b'{"turn": 3}'
 
 
 def test_restore_home_rejects_outward_symlink(worker_paths: WorkerPaths) -> None:

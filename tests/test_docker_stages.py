@@ -335,7 +335,7 @@ def test_probe_normalizes_capabilities_caches_result_and_keeps_native_wrappers(
 
     info = execution.probe(" FIXTURE ")
     cached = execution.probe("fixture")
-    codex = execution.probe("codex")
+    claude = execution.probe("claude")
     registry = execution.registry()
 
     assert info.name == "fixture" and info.available and info.version == "fixture-1"
@@ -345,9 +345,9 @@ def test_probe_normalizes_capabilities_caches_result_and_keeps_native_wrappers(
     assert cached is info
     assert worker_modes == ["prepare", "probe"]
     assert events == ["removed:probe-stage", "lease-released"]
-    assert not codex.available
-    assert codex.capabilities == BackendCapabilities()
-    assert "unsupported" in codex.reason
+    assert not claude.available
+    assert claude.capabilities == BackendCapabilities()
+    assert "unsupported" in claude.reason
     assert registry.names() == ("claude", "codex", "fixture", "opencode")
     assert registry.get("FIXTURE").name == "fixture"
 

@@ -353,11 +353,124 @@ def test_only_allowlisted_headers_are_forwarded() -> None:
     assert not [name for name, _ in headers if name.lower().startswith(("x-", "proxy-"))]
 
 
+def test_credentialed_headers_use_only_client_content_type_and_accept() -> None:
+    message = _message(
+        "Host: 10.0.0.4:8080\r\n"
+        "Authorization: Bearer client-secret\r\n"
+        "Content-Type: application/json\r\n"
+        "Accept: text/event-stream\r\n"
+        "chatgpt-account-id: attacker-account\r\n"
+        "Cookie: session=client-secret\r\n"
+        "OpenAI-Beta: attacker-beta\r\n"
+        "originator: attacker-origin\r\n"
+        "x-session-token: client-secret\r\n"
+    )
+    forwarded = gateway.collect_headers(message, ("10.0.0.4:8080",), credentialed=True)
+    headers = gateway.build_upstream_headers(
+        "chatgpt.com",
+        forwarded,
+        17,
+        credentials={
+            "authorization": "Bearer root-secret",
+            "chatgpt-account-id": "root-account",
+        },
+    )
+    assert forwarded == {"accept": "text/event-stream", "content-type": "application/json"}
+    assert headers == [
+        ("Host", "chatgpt.com"),
+        ("Content-Length", "17"),
+        ("Accept-Encoding", "identity"),
+        ("accept", "text/event-stream"),
+        ("content-type", "application/json"),
+        ("Authorization", "Bearer root-secret"),
+        ("OpenAI-Beta", "responses=experimental"),
+        ("chatgpt-account-id", "root-account"),
+        ("originator", "codex_cli_rs"),
+    ]
+    values = [value for _, value in headers]
+    for secret in ("client-secret", "attacker-account", "attacker-beta", "attacker-origin"):
+        assert secret not in values
+
+
+def test_api_credentials_do_not_add_chatgpt_account_headers() -> None:
+    headers = gateway.build_upstream_headers(
+        "api.openai.com",
+        {"accept": "application/json", "authorization": "Bearer client"},
+        2,
+        credentials={
+            "authorization": "Bearer root-secret",
+            "chatgpt-account-id": "ignored-account",
+        },
+    )
+    assert headers[-2:] == [
+        ("Authorization", "Bearer root-secret"),
+        ("OpenAI-Beta", "responses=experimental"),
+    ]
+
+
 def test_upstream_headers_never_carry_client_framing() -> None:
     message = _message("Host: 10.0.0.4:8080\r\nAuthorization: Bearer s\r\n")
     forwarded = gateway.collect_headers(message, ("10.0.0.4:8080", "10.0.0.4"))
     names = [name for name, _ in gateway.build_upstream_headers("opencode.ai", forwarded, 2)]
     assert names == ["Host", "Content-Length", "Accept-Encoding", "authorization"]
+
+
+def test_credentials_file_is_bounded_validated_and_keeps_values_out_of_errors(
+    tmp_path: Any,
+) -> None:
+    path = tmp_path / "credentials.json"
+    path.write_text(
+        '{"authorization":"Bearer root-token","chatgpt-account-id":"account-123"}',
+        encoding="utf-8",
+    )
+    assert gateway.load_credentials(str(path)) == {
+        "authorization": "Bearer root-token",
+        "chatgpt-account-id": "account-123",
+    }
+
+    for malformed in (
+        '{"authorization":"Bearer root-token","unexpected":"root-token"}',
+        '{"authorization":"Bearer root-token","authorization":"Bearer other"}',
+        '{"authorization":"Bearer root-token\\nsecret"}',
+        '{"authorization":"Basic root-token"}',
+        '{"authorization":17}',
+        '{"authorization":"Bearer root-token","chatgpt-account-id":null}',
+        '{"authorization":"Bearer root-token","chatgpt-account-id":"bad\\naccount"}',
+    ):
+        path.write_text(malformed, encoding="utf-8")
+        with pytest.raises(gateway.ConfigError) as error:
+            gateway.load_credentials(str(path))
+        assert "root-token" not in str(error.value)
+        assert "secret" not in str(error.value)
+
+    path.write_bytes(b" " * (gateway.MAX_CREDENTIAL_FILE_BYTES + 1))
+    with pytest.raises(gateway.ConfigError, match="too large"):
+        gateway.load_credentials(str(path))
+
+
+@pytest.mark.parametrize(
+    ("host", "prefix"),
+    [
+        ("api.openai.com", "/v1"),
+        ("chatgpt.com", "/backend-api/codex"),
+    ],
+)
+def test_credential_destinations_are_the_two_fixed_openai_origins(host: str, prefix: str) -> None:
+    gateway.validate_credential_destination(host, prefix)
+
+
+@pytest.mark.parametrize(
+    ("host", "prefix"),
+    [
+        ("opencode.ai", "/zen/v1"),
+        ("api.openai.com", "/backend-api/codex"),
+        ("chatgpt.com", "/v1"),
+        ("evil.example", "/v1"),
+    ],
+)
+def test_credential_destinations_reject_other_host_prefix_pairs(host: str, prefix: str) -> None:
+    with pytest.raises(gateway.ConfigError):
+        gateway.validate_credential_destination(host, prefix)
 
 
 @pytest.mark.parametrize(
@@ -509,6 +622,7 @@ def _handler(peer: str = "127.0.0.1") -> tuple[Any, list[str]]:
     handler._headers_buffer = []
     handler._response_started = False
     handler._route_name = "chat/completions"
+    handler.server = mock.Mock(credentials=None)
     journal: list[str] = []
     handler.wfile = RecordingWriter(journal)
     return handler, journal
@@ -566,6 +680,33 @@ def test_relay_refuses_a_redirect_before_any_header_is_sent() -> None:
     assert handler.wfile.getvalue() == b""
 
 
+@pytest.mark.parametrize(
+    ("status", "hint"),
+    [
+        (401, b"upstream authentication failed; please sign in again"),
+        (403, b"upstream authentication failed; please sign in again"),
+        (500, b"upstream request failed (HTTP 500); check model and account limits"),
+    ],
+)
+def test_credentialed_upstream_errors_keep_status_and_hide_the_upstream_body(
+    status: int, hint: bytes
+) -> None:
+    handler, _ = _handler()
+    handler.server = mock.Mock(credentials={"authorization": "Bearer root-secret"})
+    response = FakeResponse(
+        [b"provider detail containing root-secret"],
+        status=status,
+        headers="Content-Type: application/json\r\n",
+    )
+    handler._relay(response)
+    written = handler.wfile.getvalue()
+    assert written.startswith(f"HTTP/1.1 {status} ".encode("ascii"))
+    assert hint in written
+    assert b"provider detail" not in written
+    assert b"root-secret" not in written
+    assert response.reads == []
+
+
 def test_failure_bodies_never_echo_the_request() -> None:
     handler, _ = _handler()
     handler._fail(400, "the request body is too large")
@@ -580,6 +721,30 @@ def _server() -> Any:
     return gateway.GatewayServer(
         "127.0.0.1", 0, upstream, gateway.build_routes("/zen/v1"), gateway.build_context()
     )
+
+
+def test_credentialed_server_exposes_only_the_responses_route() -> None:
+    server = gateway.GatewayServer(
+        "127.0.0.1",
+        0,
+        gateway.Upstream("api.openai.com", socket.AF_INET, "93.184.216.34"),
+        gateway.build_routes("/v1"),
+        gateway.build_context(),
+        credentials={"authorization": "Bearer root-secret"},
+    )
+    try:
+        assert set(server.routes) == {"/v1/responses"}
+        assert gateway.resolve_route(server.routes, "POST", "/v1/responses").name == "responses"
+        for method, target in (
+            ("GET", "/v1/responses"),
+            ("POST", "/v1/chat/completions"),
+            ("POST", "/v1/messages"),
+            ("GET", "/v1/models"),
+        ):
+            with pytest.raises(gateway.RequestError):
+                gateway.resolve_route(server.routes, method, target)
+    finally:
+        server.server_close()
 
 
 def test_a_busy_gateway_answers_503_without_reading_the_request() -> None:
@@ -700,3 +865,32 @@ def test_main_refuses_settings_it_cannot_serve() -> None:
         )
         == 2
     )
+
+
+def test_main_refuses_an_invalid_credential_destination_without_logging_secrets(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    credentials = tmp_path / "credentials.json"
+    credentials.write_text('{"authorization":"Bearer never-log-this-token"}', encoding="utf-8")
+    monkeypatch.setattr(
+        gateway,
+        "pin_upstream",
+        lambda _host: pytest.fail("invalid credential destination reached DNS pinning"),
+    )
+    result = _run_main(
+        [
+            "--upstream-host",
+            "opencode.ai",
+            "--upstream-prefix",
+            "/zen/v1",
+            "--bind",
+            "127.0.0.1",
+            "--credentials-file",
+            str(credentials),
+        ],
+        [_answer(socket.AF_INET, "93.184.216.34")],
+    )
+    assert result == 2
+    assert "never-log-this-token" not in capsys.readouterr().err

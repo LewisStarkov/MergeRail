@@ -14,7 +14,7 @@ docker image inspect --format '{{.Id}}' mergerail-runtime:local
 docker pull python@sha256:e2a5fce94bd761967528a12f16d707c2613e1522f3f2d77fa45766f45962547f
 ```
 
-The Dockerfile includes Python, Git, Node, npm, and OpenCode. Install any additional project tools in an operator-maintained image before running a task. MergeRail never builds a project's Dockerfile or installs dependencies on the host. Images must already exist locally and must be pinned by `sha256:` ID or registry digest.
+The Dockerfile includes Python, Git, Node, npm, OpenCode, and Codex CLI 0.159.2. Install any additional project tools in an operator-maintained image before running a task. MergeRail never builds a project's Dockerfile or installs dependencies on the host. Images must already exist locally and must be pinned by `sha256:` ID or registry digest.
 
 Add this to `mergerail.toml`, substituting the inspected image ID:
 
@@ -32,9 +32,57 @@ backend = "opencode"
 backend = "opencode"
 ```
 
-Keep any existing agent options in those tables. The default online model is `opencode/space-bunny-free`. A selected model must be present in the local OpenCode model catalogue and declare zero input/output/cache cost. Docker's online path currently supports the fixed keyless OpenCode Zen origin only. Claude and Codex online execution are unavailable. Operator-configured external driver commands can run offline inside the image.
+Keep any existing agent options in those tables. The default online model is `opencode/space-bunny-free`. A selected model must be present in the local OpenCode model catalogue and declare zero input/output/cache cost. OpenCode uses the fixed keyless OpenCode Zen origin. Codex uses a separate authenticated gateway, described below. Claude online execution is unavailable. Operator-configured external driver commands can run offline inside the image.
 
 Alternatively, pass `--docker-image sha256:…` to `init`, `doctor`, or `run`, or set `MERGERAIL_EXECUTION_IMAGE`. `MERGERAIL_EXECUTION_BACKEND=docker` and `MERGERAIL_EXECUTION_REQUIRED=true` are also supported. `init` persists the validated execution settings. Run `mergerail doctor --run-checks` to validate the engine, image, backend, and baseline before queueing work.
+
+## Codex authentication
+
+Install Codex CLI 0.159.2 on the controller host for login and token refresh.
+Run `codex login`, then select Codex for both agents:
+
+```toml
+[execution]
+backend = "docker"
+required = true
+profile = "eco"
+image = "sha256:REPLACE_WITH_64_HEX_DIGITS"
+codex_auth = "chatgpt"
+
+[agents.fixer]
+backend = "codex"
+model = "gpt-6.1-sol"
+
+[agents.reviewer]
+backend = "codex"
+model = "gpt-6.1-sol"
+```
+
+The default `codex_auth = "chatgpt"` uses subscription authentication from the
+host's `~/.codex/auth.json`, or `$CODEX_HOME/auth.json` when configured. File-based
+login caching is required; an OS keyring alone is unavailable to this runtime.
+The controller reads the cache again for each turn. It sends only the access
+token and account ID to a source-free gateway container through bounded stdin.
+Refresh tokens, the host home, and the login cache are never copied into the
+agent container. Before expiry, the controller uses the host Codex CLI account RPC to refresh
+authentication in its normal login cache. This RPC opens no coding session and
+runs outside the project. If the login is revoked or rotation fails, run
+`codex login` on the host and retry the task.
+
+To opt into usage-based OpenAI API billing, set `codex_auth = "api"` and provide
+`MERGERAIL_CODEX_ALLOW_API_BILLING=1` and `OPENAI_API_KEY` in the controller
+environment, or enable that billing flag and use a host auth cache created
+with `codex login --with-api-key`. A key in the environment never switches a
+ChatGPT task to API billing automatically. Keep credentials out of
+`mergerail.toml` and Git.
+
+Codex model traffic reaches only the gateway's fixed Responses endpoint at
+`chatgpt.com/backend-api/codex` or `api.openai.com/v1`, according to the selected
+authentication method. The gateway supplies credentials independently of client
+headers. Agent sessions persist between fixer turns; login and provider config
+files are excluded when restoring the task home. Codex uses the container's
+isolation and permissions for both roles, including the reviewer's immutable
+source snapshot.
 
 ## What a task can access
 
@@ -67,3 +115,14 @@ MERGERAIL_TEST_DOCKER_IMAGE=sha256:YOUR_IMAGE_ID pytest tests/test_docker_integr
 ```
 
 They exercise a fixer, destructive check side effects, an enforced read-only reviewer, exact local delivery, failure preservation, and delivery retry. Online provider validation additionally requires the model catalogue and a reachable fixed upstream.
+
+Live Codex acceptance uses the controller's ChatGPT login and is separately opt-in:
+
+```sh
+MERGERAIL_TEST_CODEX_IMAGE=sha256:YOUR_IMAGE_ID pytest tests/test_docker_codex_integration.py
+```
+
+Set `MERGERAIL_TEST_CODEX_MODEL` if the account uses another model. This test
+makes real subscription calls and verifies fixer edits, resume across separate
+containers, offline checks, and structured review with denied write/chmod
+attempts. It leaves the host branch unchanged.

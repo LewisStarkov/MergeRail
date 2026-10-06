@@ -33,11 +33,16 @@ class ExecutionPolicy:
     upstream_host: str = "opencode.ai"
     upstream_prefix: str = "/zen/v1"
     opencode_model: str = "opencode/space-bunny-free"
+    codex_auth: str = "chatgpt"
     release_scope: str = ""
 
     @property
     def digest(self) -> str:
-        return hashlib.sha256(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()
+        values = asdict(self)
+        # Keep approved delivery retries from before Codex support compatible.
+        if self.codex_auth == "chatgpt":
+            values.pop("codex_auth")
+        return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
     def validate(self) -> None:
         if self.release_scope not in {"", "rivals-dev"}:
@@ -74,7 +79,9 @@ class ExecutionPolicy:
         if self.idle_stop_seconds > 60:
             raise ValueError("eco idle_stop_seconds must be at most 60")
         if self.upstream_host != "opencode.ai" or self.upstream_prefix != "/zen/v1":
-            raise ValueError("Docker AI currently supports the fixed OpenCode Zen origin only")
+            raise ValueError("OpenCode requires the fixed OpenCode Zen origin")
+        if not isinstance(self.codex_auth, str) or self.codex_auth not in {"chatgpt", "api"}:
+            raise ValueError("execution.codex_auth must be 'chatgpt' or 'api'")
         if not isinstance(self.opencode_model, str) or not re.fullmatch(
             r"opencode/[a-zA-Z0-9._-]{1,128}", self.opencode_model
         ):

@@ -40,8 +40,11 @@ class CodexBackend:
 
     name = "codex"
 
-    def __init__(self, command: Sequence[str] = ("codex",)) -> None:
+    def __init__(
+        self, command: Sequence[str] = ("codex",), *, sandboxed_externally: bool = False
+    ) -> None:
         self._command = tuple(command)
+        self._sandboxed_externally = sandboxed_externally
 
     def probe(self) -> BackendInfo:
         try:
@@ -65,18 +68,31 @@ class CodexBackend:
         )
 
     def open_session(self, spec: SessionSpec, events: EventSink | None = None) -> CodexSession:
-        return CodexSession(self._command, spec, events or NullEventSink())
+        return CodexSession(
+            self._command,
+            spec,
+            events or NullEventSink(),
+            sandboxed_externally=self._sandboxed_externally,
+        )
 
 
 class CodexSession:
     """One resumable Codex thread."""
 
-    def __init__(self, command: Sequence[str], spec: SessionSpec, events: EventSink) -> None:
+    def __init__(
+        self,
+        command: Sequence[str],
+        spec: SessionSpec,
+        events: EventSink,
+        *,
+        sandboxed_externally: bool = False,
+    ) -> None:
         self._executable = tuple(command)
         self.spec = spec
         self.events = events
         self.session_id = spec.resume_session_id
         self._controller = ProcessController()
+        self._sandboxed_externally = sandboxed_externally
 
     @property
     def capabilities(self) -> BackendCapabilities:
@@ -91,7 +107,7 @@ class CodexSession:
             "never",
         ]
         read_only = self.spec.read_only or self.spec.role == "reviewer"
-        if self.spec.permission == "skip" and not read_only:
+        if self._sandboxed_externally or (self.spec.permission == "skip" and not read_only):
             args.append("--dangerously-bypass-approvals-and-sandbox")
         else:
             args += ["--sandbox", "read-only" if read_only else "workspace-write"]

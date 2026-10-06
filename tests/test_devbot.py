@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from email.message import Message
 from pathlib import Path
+from urllib.request import Request
 
 import pytest
 
@@ -354,7 +356,9 @@ def test_health_failure_reports_http_status(monkeypatch: pytest.MonkeyPatch) -> 
     from mergerail.devbot_deploy import probe_health
 
     def denied(*_: object, **__: object) -> object:
-        raise urllib.error.HTTPError("https://dev.rivals.baby/health", 503, "unhealthy", {}, None)
+        raise urllib.error.HTTPError(
+            "https://dev.rivals.baby/health", 503, "unhealthy", Message(), None
+        )
 
     monkeypatch.setattr("mergerail.devbot_deploy.urllib.request.urlopen", denied)
     assert probe_health("a" * 40) == (False, "health endpoint returned HTTP 503")
@@ -379,7 +383,7 @@ def test_health_requires_bounded_matching_revision(
 
     from mergerail.devbot_deploy import probe_health
 
-    def respond(request: object, **_: object) -> io.BytesIO:
+    def respond(request: Request, **_: object) -> io.BytesIO:
         assert request.headers["User-agent"] == "Rivals-Deploy/1.0"
         return io.BytesIO(payload)
 

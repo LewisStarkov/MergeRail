@@ -1163,8 +1163,10 @@ class DockerExecution:
         result_sha = self.worktree.head()
         if not base_sha or not result_sha:
             raise DockerExecutionError("reset the Docker worktree before opening an agent session")
-        gateway = session.backend_name == "opencode"
-        model_definition = self._selected_model_definition() if gateway else {}
+        gateway = session.backend_name in {"opencode", "codex"}
+        model_definition = (
+            self._selected_model_definition() if session.backend_name == "opencode" else {}
+        )
         session_file = self._task_dir() / "fixer-home.tar"
         home_archive: bytes | None = None
         if role == "fixer" and session_file.exists():
@@ -1184,7 +1186,10 @@ class DockerExecution:
         try:
             if gateway:
                 network = self._create_network()
-                gateway_container, gateway_ip = self._start_gateway(network)
+                if session.backend_name == "codex":
+                    gateway_container, gateway_ip = self._start_gateway(network, backend="codex")
+                else:
+                    gateway_container, gateway_ip = self._start_gateway(network)
             else:
                 gateway_ip = ""
             self._phase(
@@ -1217,7 +1222,9 @@ class DockerExecution:
                 "schema": request.schema,
                 "system_prompt": session.spec.system_prompt,
                 "read_only": role == "reviewer" or session.spec.read_only,
-                "model": self.policy.opencode_model if gateway else session.spec.model,
+                "model": self.policy.opencode_model
+                if session.backend_name == "opencode"
+                else session.spec.model,
                 "model_definition": model_definition,
                 "effort": session.spec.effort,
                 "settings": dict(session.spec.settings),
@@ -1226,6 +1233,7 @@ class DockerExecution:
                 "resume_session_id": session.session_id,
                 "gateway": gateway,
                 "gateway_host": gateway_ip,
+                "codex_auth": self.policy.codex_auth,
                 "max_bundle_bytes": self.policy.max_bundle_mib * MIB,
             }
             timeout = max(30, float(session.spec.timeout) + 30)
@@ -1387,7 +1395,21 @@ class DockerExecution:
         finally:
             self._remove_container(container)
 
-    def _start_gateway(self, network: str) -> tuple[str, str]:
+    def _start_gateway(self, network: str, *, backend: str = "opencode") -> tuple[str, str]:
+        host, prefix = self.policy.upstream_host, self.policy.upstream_prefix
+        credentials: dict[str, str] | None = None
+        if backend == "codex":
+            from .codex_auth import CodexAuthError, gateway_credentials
+
+            try:
+                credentials = gateway_credentials(self.policy.codex_auth)
+            except CodexAuthError as error:
+                raise DockerExecutionError(str(error)) from None
+            host, prefix = (
+                ("chatgpt.com", "/backend-api/codex")
+                if self.policy.codex_auth == "chatgpt"
+                else ("api.openai.com", "/v1")
+            )
         gateway = self._create_container(
             network=network,
             image=self.policy.gateway_image,
@@ -1397,6 +1419,17 @@ class DockerExecution:
             self._copy_into(
                 gateway, "/tmp/mergerail-runtime.zip", self._runtime_zip(), maximum=8 * MIB
             )
+            credential_args: list[str] = []
+            if credentials is not None:
+                # Only this source-free sidecar receives credentials. stdin is
+                # bounded; tokens never enter argv, image env, or task archives.
+                self._copy_into(
+                    gateway,
+                    "/tmp/codex-credentials.json",
+                    json.dumps(credentials).encode(),
+                    maximum=65536,
+                )
+                credential_args = ["--credentials-file", "/tmp/codex-credentials.json"]
             self._docker("network", "connect", "bridge", gateway, timeout=30)
             inspected = self._inspect_container(gateway)
             endpoint = inspected.get("NetworkSettings", {}).get("Networks", {}).get(network, {})
@@ -1408,8 +1441,9 @@ class DockerExecution:
                 "os.environ.update({'PATH':'/usr/local/bin:/usr/bin:/bin',"
                 "'HOME':'/tmp'});sys.path.insert(0,'/tmp/mergerail-runtime.zip');"
                 "from mergerail.execution.gateway import main;"
-                f"raise SystemExit(main(['--upstream-host',{self.policy.upstream_host!r},"
-                f"'--upstream-prefix',{self.policy.upstream_prefix!r},'--bind',{address!r},'--port','8765']))"
+                f"raise SystemExit(main(['--upstream-host',{host!r},"
+                f"'--upstream-prefix',{prefix!r},'--bind',{address!r},'--port','8765']"
+                f"+{credential_args!r}))"
             )
             self._docker(
                 "exec",
@@ -1694,7 +1728,7 @@ class DockerExecution:
         key = name.strip().lower()
         if key in self._probes:
             return self._probes[key]
-        if key in {"claude", "codex"}:
+        if key == "claude":
             info = BackendInfo(
                 key,
                 False,
@@ -1771,6 +1805,13 @@ class DockerExecution:
                 self._selected_model_definition()
             except DockerExecutionError as error:
                 return BackendInfo(key, False, reason=str(error))
+        if key == "codex":
+            from .codex_auth import CodexAuthError, gateway_credentials
+
+            try:
+                gateway_credentials(self.policy.codex_auth)
+            except CodexAuthError as error:
+                return BackendInfo(key, False, reason=str(error))
         return self._probe_backend(key)
 
     def registry(self) -> BackendRegistry:
@@ -1778,7 +1819,9 @@ class DockerExecution:
 
         names = {"opencode", "claude", "codex", *self.external_backends}
         reserved = {
-            name for name in self.external_backends if name in {"opencode", "claude", "codex"}
+            name
+            for name in self.external_backends
+            if name.strip().lower() in {"opencode", "claude", "codex"}
         }
         if reserved:
             raise DockerExecutionError(

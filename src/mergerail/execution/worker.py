@@ -432,7 +432,7 @@ def _restore_home(request: dict[str, Any]) -> None:
         archive,
         HOME,
         limit_bytes=int(request["max_bundle_bytes"]),
-        excluded_paths=(".opencode",),
+        excluded_paths=(".opencode", ".codex/auth.json", ".codex/config.toml"),
     )
 
 
@@ -725,6 +725,9 @@ def _turn(request: dict[str, Any]) -> dict[str, Any]:
     role = request.get("role")
     if role not in {"fixer", "reviewer"}:
         raise WorkerError("agent role is invalid")
+    name = str(request.get("backend", "opencode")).strip().lower()
+    if name == "codex" and not request.get("gateway"):
+        raise WorkerError("Docker Codex requires its credential gateway")
     _restore_home(request)
     _clean_environment(role=str(role), gateway=bool(request.get("gateway")))
     if bool(request.get("gateway")):
@@ -740,6 +743,7 @@ def _turn(request: dict[str, Any]) -> dict[str, Any]:
         ):
             raise WorkerError("AI gateway must have a literal private IPv4 address")
         gateway_host = str(address)
+    if bool(request.get("gateway")) and name == "opencode":
         selected_model = str(request.get("model", "opencode/space-bunny-free"))
         provider, separator, model_id = selected_model.partition("/")
         if provider != "opencode" or not separator or not model_id:
@@ -786,11 +790,56 @@ def _turn(request: dict[str, Any]) -> dict[str, Any]:
         if isinstance(request.get("resume_session_id"), str)
         else None,
     )
-    name = str(request.get("backend", "opencode")).strip().lower()
     registry = default_registry()
+    if name == "codex":
+        from mergerail.backends.codex import CodexBackend
+
+        prefix = "/backend-api/codex" if request.get("codex_auth") == "chatgpt" else "/v1"
+        codex_home = HOME / ".codex"
+        codex_home.mkdir(parents=True, exist_ok=True)
+        os.environ["CODEX_HOME"] = str(codex_home)
+        command = [
+            "codex",
+            "--config",
+            'model_provider="mergerail"',
+            "--config",
+            'model_providers.mergerail.name="openai"',
+            "--config",
+            f'model_providers.mergerail.base_url="http://{gateway_host}:8765{prefix}"',
+            "--config",
+            'model_providers.mergerail.wire_api="responses"',
+            "--config",
+            "model_providers.mergerail.requires_openai_auth=false",
+            "--config",
+            "model_providers.mergerail.supports_websockets=false",
+            "--config",
+            'cli_auth_credentials_store="ephemeral"',
+            "--config",
+            'web_search="disabled"',
+            "--config",
+            "mcp_servers={}",
+            "--config",
+            'projects./work/repo.trust_level="untrusted"',
+            "--config",
+            "features.plugins=false",
+            "--config",
+            "features.hooks=false",
+        ]
+        # Reviewers use a different UID from the source owner. A read-only
+        # fixer still needs Codex's native sandbox: its UID owns the source.
+        registry.register(
+            CodexBackend(command, sandboxed_externally=role == "reviewer" or not spec.read_only),
+            replace=True,
+        )
     external = request.get("external_backends")
     if isinstance(external, dict):
         for ext_name, command in external.items():
+            if isinstance(ext_name, str) and ext_name.strip().lower() in {
+                "opencode",
+                "claude",
+                "codex",
+            }:
+                raise WorkerError("external backends cannot replace built-in Docker providers")
             if (
                 isinstance(ext_name, str)
                 and isinstance(command, list)
@@ -798,7 +847,7 @@ def _turn(request: dict[str, Any]) -> dict[str, Any]:
                 and all(isinstance(part, str) for part in command)
             ):
                 registry.register_external(ExternalBackend(ext_name, command), replace=True)
-    if name in {"claude", "codex"}:
+    if name == "claude":
         raise WorkerError(
             f"Docker backend {name!r} is unsupported until provider authentication is validated"
         )
@@ -826,7 +875,7 @@ def _probe(request: dict[str, Any]) -> dict[str, Any]:
     from mergerail.backends.external import ExternalBackend
 
     name = str(request.get("backend", "opencode")).strip().lower()
-    if name in {"claude", "codex"}:
+    if name == "claude":
         return {
             "name": name,
             "available": False,
@@ -838,6 +887,12 @@ def _probe(request: dict[str, Any]) -> dict[str, Any]:
     external = request.get("external_backends")
     if isinstance(external, dict):
         for ext_name, command in external.items():
+            if isinstance(ext_name, str) and ext_name.strip().lower() in {
+                "opencode",
+                "claude",
+                "codex",
+            }:
+                raise WorkerError("external backends cannot replace built-in Docker providers")
             if (
                 isinstance(ext_name, str)
                 and isinstance(command, list)
