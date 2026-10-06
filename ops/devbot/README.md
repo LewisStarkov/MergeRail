@@ -58,7 +58,9 @@ document the builder limits.
 
 Prerequisites: macOS Apple Silicon, Colima/Docker CLI, Python 3.11+, controller
 Git 2.48+, configured ngrok account, `projects-main` SSH and the checked Rivals
-`main` checkout. No account, paid resource or production credential is created.
+`main` checkout. Install Codex CLI 0.159.2 and run `codex login` on the Mac with
+file-based login caching before starting the service. No account, paid resource
+or production credential is created.
 
 ```bash
 cd /Users/lama/Documents/dev/mergerail
