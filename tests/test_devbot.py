@@ -146,6 +146,8 @@ def test_failure_recovers_previous_and_explicit_retry_uses_same_sha(
     assert read_record(directory / "status.json")["status"] == "succeeded"
     assert live["sha"] == task.approved_sha
     assert len(calls) == 3
+    states = [read_record(p)["status"] for p in sorted((directory / "history").glob("*.json"))]
+    assert "failed" in states and states[-1] == "succeeded"
 
 
 @pytest.mark.parametrize(

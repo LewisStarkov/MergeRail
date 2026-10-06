@@ -17,6 +17,24 @@ def run(*args: str, **kwargs: object) -> str:
     return subprocess.check_output(args, text=True, **kwargs).strip()
 
 
+running = subprocess.run(
+    [*ENGINE, "inspect", "mergerail-devbot-controller-1", "--format", "{{.State.Running}}"],
+    capture_output=True,
+    text=True,
+)
+if running.returncode == 0 and running.stdout.strip() == "true":
+    raise SystemExit("Stop the controller before updating images; active approvals need their pins")
+# Keep existing immutable references before moving the convenience :checked tags.
+previous = RUNTIME / "runtime.env"
+if previous.exists():
+    values = dict(line.split("=", 1) for line in previous.read_text().splitlines() if "=" in line)
+    for role in ("worker", "controller"):
+        image = values[f"MERGERAIL_{role.upper()}_IMAGE"]
+        subprocess.run(
+            [*ENGINE, "image", "tag", image, f"mergerail-devbot-{role}:pin-{image[7:]}"],
+            check=True,
+        )
+
 os.umask(0o077)
 for name in ("secrets", "outbox", "deployer", "build/controller", "build/worker"):
     (RUNTIME / name).mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -73,7 +91,14 @@ shutil.copyfile(SOURCE / "ops/devbot/worker.Dockerfile", worker / "Dockerfile")
 shutil.copyfile(SOURCE / "ops/devbot/checks.py", worker / "checks.py")
 for name, context in (("worker", worker), ("controller", controller)):
     subprocess.run(
-        [*ENGINE, "build", "-t", f"mergerail-devbot-{name}:checked", str(context)],
+        [
+            *ENGINE,
+            "build",
+            "--provenance=false",
+            "-t",
+            f"mergerail-devbot-{name}:checked",
+            str(context),
+        ],
         check=True,
         timeout=1800,
     )
@@ -83,6 +108,10 @@ images = {
     )
     for name in ("worker", "controller")
 }
+for role, image in images.items():
+    subprocess.run(
+        [*ENGINE, "image", "tag", image, f"mergerail-devbot-{role}:pin-{image[7:]}"], check=True
+    )
 subprocess.run(
     [
         *ENGINE,

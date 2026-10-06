@@ -88,6 +88,11 @@ class DevBotDeployer:
 
     def write_status(self, directory: Path, request: dict[str, Any], **values: Any) -> None:
         record = {**request, **values, "updated_at": now_iso(), "url": DEV_URL}
+        history = directory / "history"
+        history.mkdir(mode=0o700, exist_ok=True)
+        if history.is_symlink():
+            raise ValueError("deployment history must not be a symlink")
+        write_atomic(history / f"{time.time_ns()}.json", json.dumps(record))
         write_atomic(directory / "status.json", json.dumps(record))
 
     def approval(self, request: dict[str, Any]) -> None:

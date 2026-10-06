@@ -92,6 +92,8 @@ at user login and restarts the adapter after failure. Availability depends on
 this Mac being awake and the user session running.
 
 Outbox jobs persist task ID, attempt, approved SHA, base SHA and bundle checksum.
+Every deployment status transition is saved in the job’s `history/` directory,
+including failed attempts and subsequent retries.
 The adapter cross-checks the runner approval and saves its own copy before using
 SSH. It deploys the approved Git objects, not a working directory or floating
 HEAD. The release source and images derive from that exact SHA. Automatic jobs
@@ -129,7 +131,9 @@ paths. Never run Docker prune or operate on other projects' resources.
 
 ## Update, stop and rollback
 
-Update only while no task/build/deployment is active. Save `runtime.env`, rebuild
+Update only while no task/build/deployment is active. Stop the adapter and
+controller with the commands below first; preparation refuses a running controller.
+Images receive permanent digest tags before convenience tags move. Save `runtime.env`, rebuild
 with `prepare.py`, and reinstall the service snapshot with `install-service.py`, then restart. An image/policy change invalidates
 pending approvals; retain the original image/config to recover them or obtain
 a new review. Preparation never resets an existing project volume.
