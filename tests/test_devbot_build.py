@@ -10,8 +10,9 @@ from mergerail.devbot_build import ENGINE, prepare_images
 from tests.conftest import run
 
 
+@pytest.mark.parametrize("import_fails", [False, True])
 def test_build_exports_approved_tree_and_never_working_secrets(
-    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, import_fails: bool
 ) -> None:
     for name in (
         "Dockerfile",
@@ -70,11 +71,17 @@ def test_build_exports_approved_tree_and_never_working_secrets(
         remotes.append(command)
         if "echo cached" in command:
             return "missing" if "rivals-dev-app:" in command else "cached"
+        if "docker load" in command and import_fails:
+            raise RuntimeError("image verification failed")
         return ""
 
     monkeypatch.setattr("mergerail.devbot_build.subprocess.run", fake_process)
     monkeypatch.setattr("mergerail.devbot_build.subprocess.check_output", fake_output)
-    prepare_images(repo, state, sha, remote, wrapper)
+    if import_fails:
+        with pytest.raises(RuntimeError, match="image verification failed"):
+            prepare_images(repo, state, sha, remote, wrapper)
+    else:
+        prepare_images(repo, state, sha, remote, wrapper)
     context = state / f"build-{sha}"
     assert not context.exists()
     build = next(command for command in commands if "--target" in command)
@@ -83,3 +90,5 @@ def test_build_exports_approved_tree_and_never_working_secrets(
     assert any("--pids-limit=256" in command for command in commands)
     assert any("sha256sum -c" in command and "docker load" in command for command in remotes)
     assert not (state / "image.tar").exists()
+    assert any("image" in command and "rm" in command for command in commands)
+    assert any("-delete" in command for command in remotes)

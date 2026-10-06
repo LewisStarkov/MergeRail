@@ -181,53 +181,71 @@ def _prepare_images(
     if run([*ENGINE, "update", "--pids-limit=256", BUILD_CONTAINER], log, 30):
         raise RuntimeError("cannot enforce build PID limit")
     for target, image in missing.items():
-        command = [
-            *ENGINE,
-            "buildx",
-            "build",
-            "--builder",
-            BUILDER,
-            "--platform",
-            "linux/amd64",
-            "--provenance=false",
-            "--load",
-            "--target",
-            target,
-            "-t",
-            image,
-            str(context),
-        ]
-        if run(command, log, 1800):
-            raise RuntimeError(
-                "isolated image build failed; DevBot unchanged; see private build.log"
-            )
-        expected = subprocess.check_output(
-            [*ENGINE, "image", "inspect", "--platform=linux/amd64", image, "--format", "{{.Id}}"],
-            text=True,
-        ).strip()
-        # Only the trusted host transports images; no credentials enter the builder.
-        output = state / "image.tar"
-        if run(
-            [*ENGINE, "image", "save", "--platform=linux/amd64", "-o", str(output), image], log, 300
-        ):
-            raise RuntimeError("cannot export the immutable build image")
-        if output.stat().st_size > 4 * 1024 * 1024 * 1024:
-            raise RuntimeError("build image archive exceeds the 4 GiB limit")
-        with output.open("rb") as handle:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
         incoming = f"/opt/rivals-dev-config/mergerail-image-{sha}.tar"
-        if run(
-            ["rsync", "--partial", "--timeout=120", str(output), f"projects-main:{incoming}"],
-            log,
-            1800,
-        ):
-            raise RuntimeError("immutable image upload failed")
-        remote(
-            f"set -eu\necho '{digest}  {incoming}' | sha256sum -c -\n"
-            f"docker load -i '{incoming}' >/dev/null\n"
-            f"test \"$(docker image inspect '{image}' --format '{{{{.Id}}}}')\" = '{expected}'\n"
-            f"rm -- '{incoming}'\n"
-        )
-        output.unlink()
-        if run([*ENGINE, "image", "rm", image], log, 30):
-            raise RuntimeError("uploaded image is verified, but VM image cleanup failed")
+        try:
+            command = [
+                *ENGINE,
+                "buildx",
+                "build",
+                "--builder",
+                BUILDER,
+                "--platform",
+                "linux/amd64",
+                "--provenance=false",
+                "--load",
+                "--target",
+                target,
+                "-t",
+                image,
+                str(context),
+            ]
+            if run(command, log, 1800):
+                raise RuntimeError(
+                    "isolated image build failed; DevBot unchanged; see private build.log"
+                )
+            expected = subprocess.check_output(
+                [
+                    *ENGINE,
+                    "image",
+                    "inspect",
+                    "--platform=linux/amd64",
+                    image,
+                    "--format",
+                    "{{.Id}}",
+                ],
+                text=True,
+            ).strip()
+            # Only the trusted host transports images; no credentials enter the builder.
+            output = state / "image.tar"
+            if run(
+                [*ENGINE, "image", "save", "--platform=linux/amd64", "-o", str(output), image],
+                log,
+                300,
+            ):
+                raise RuntimeError("cannot export the immutable build image")
+            if output.stat().st_size > 4 * 1024 * 1024 * 1024:
+                raise RuntimeError("build image archive exceeds the 4 GiB limit")
+            with output.open("rb") as handle:
+                digest = hashlib.file_digest(handle, "sha256").hexdigest()
+            if run(
+                ["rsync", "--partial", "--timeout=120", str(output), f"projects-main:{incoming}"],
+                log,
+                1800,
+            ):
+                raise RuntimeError("immutable image upload failed")
+            remote(
+                f"set -eu\ntrap 'rm -f -- {incoming}' EXIT\n"
+                f"echo '{digest}  {incoming}' | sha256sum -c -\n"
+                f"docker load -i '{incoming}' >/dev/null\n"
+                f"test \"$(docker image inspect '{image}' --format '{{{{.Id}}}}')\" "
+                f"= '{expected}'\n"
+                f"rm -- '{incoming}'\n"
+            )
+            output.unlink()
+        finally:
+            run([*ENGINE, "image", "rm", image], log, 30)
+            remote(
+                "find /opt/rivals-dev-config -maxdepth 1 -type f "
+                f"'(' -name 'mergerail-image-{sha}.tar' "
+                f"-o -name '.mergerail-image-{sha}.tar.*' ')' -delete\n"
+            )

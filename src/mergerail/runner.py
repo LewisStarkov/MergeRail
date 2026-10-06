@@ -1072,7 +1072,9 @@ class Runner:
                 task.id,
                 execution={
                     **self.execution.metadata,
-                    "delivered_sha": host_git(self.config.root, "rev-parse", self.config.base_branch),
+                    "delivered_sha": host_git(
+                        self.config.root, "rev-parse", self.config.base_branch
+                    ),
                 },
             )
         completed = self.store.complete_delivery(task.id, landed.outcome, url=landed.url)

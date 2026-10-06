@@ -107,7 +107,11 @@ product scope. Changing that scope requires an explicit operator decision.
 After CPD verifies the candidate, the adapter checks public `/health` against
 the full SHA. On failure it records actual dev container state and calls the
 existing schema/database-guarded rollback, comparing the observed current SHA
-under the same deployment lock. A concurrent newer release is preserved. A refused rollback becomes `blocked`
+under the same deployment lock. A concurrent newer release is preserved. Image transport is limited to 1800 seconds and server import to 600 seconds;
+failed staging archives and temporary VM image tags are cleaned. CPD/rollback
+have a 1800-second observation deadline. If it expires, the remote process is
+left active and the queue becomes `blocked` for inspection.
+A refused rollback becomes `blocked`
 and stops the queue for operator inspection. It never downgrades/restores a
 database or blindly restarts code across a migration marker. `Retry deploy`
 uses the saved bundle/SHA and does not rerun fixer or review.

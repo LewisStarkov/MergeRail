@@ -62,7 +62,7 @@ class DevBotDeployer:
             input=script,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=600 if "docker load -i" in script else 60,
         )
         if result.returncode:
             raise RuntimeError("DevBot SSH verification failed: " + result.stderr[-500:])
@@ -179,7 +179,7 @@ class DevBotDeployer:
     def run_wrapper(self, command: list[str], log: Path, timeout: float | None = None) -> int:
         # CPD owns its remote deployment lock. Do not kill it and blindly roll back.
         # Logs stay private and are bounded by consuming stdout, not an unbounded file.
-        with log.open("wb") as handle:
+        with log.open("ab") as handle:
             log.chmod(0o600)
             process = subprocess.Popen(
                 command,
@@ -210,7 +210,7 @@ class DevBotDeployer:
                 timer.start()
             assert process.stdout is not None
             output = process.stdout
-            written = 0
+            written = handle.tell()
             for block in iter(lambda: output.read(65536), b""):
                 room = 5 * 1024 * 1024 - written
                 if room > 0:
@@ -223,12 +223,33 @@ class DevBotDeployer:
                 if timer:
                     timer.cancel()
 
+    def run_rollout(self, command: list[str], log: Path, deadline: float = 1800) -> int:
+        # A stalled rollout has unknown external state. Keep its SSH process and
+        # log drain alive; block the queue instead of interrupting remote services.
+        result: list[int | Exception] = []
+
+        def execute() -> None:
+            try:
+                result.append(self.run_wrapper(command, log))
+            except Exception as error:
+                result.append(error)
+
+        worker = threading.Thread(target=execute, daemon=True)
+        worker.start()
+        worker.join(deadline)
+        if worker.is_alive():
+            raise RuntimeError("rollout deadline exceeded; process left active for inspection")
+        value = result[0]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
     def rollback(self, previous: str, expected_current: str) -> None:
         if not re.fullmatch(r"[a-f0-9]{40}", previous):
             raise ValueError("invalid previous release SHA")
         # The existing rollback command verifies schema and database identity and
         # refuses migration-in-progress. No database downgrade or restore occurs.
-        status = self.run_wrapper(
+        status = self.run_rollout(
             [
                 "bash",
                 "scripts/rollback.sh",
@@ -299,7 +320,7 @@ class DevBotDeployer:
         self.write_status(
             directory, request, status="running", previous_sha=previous, retry_id=retry_id
         )
-        code = self.run_wrapper(
+        code = self.run_rollout(
             [
                 "bash",
                 "scripts/cpd-dev.sh",
@@ -393,6 +414,15 @@ class DevBotDeployer:
                 )
                 if old.get("status") in {"running", "blocked"}:
                     # Unknown external state blocks the queue, including newer tasks.
+                    if old.get("status") == "running":
+                        self.write_status(
+                            directory,
+                            request,
+                            status="blocked",
+                            error=str(error)[:600],
+                            previous_sha=old.get("previous_sha"),
+                            retry_id=old.get("retry_id", ""),
+                        )
                     raise RuntimeError(f"deployment recovery blocked: {error}") from error
                 retry = directory / "retry.json"
                 retry_id = str(read_record(retry).get("id", "")) if retry.exists() else ""

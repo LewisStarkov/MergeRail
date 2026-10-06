@@ -253,3 +253,27 @@ def test_completed_recovery_archives_are_cleaned_only_after_publication(
     assert directory.joinpath("request.json").exists()
     assert not archive.exists()
     assert preserved.exists()
+
+
+def test_rollout_deadline_keeps_external_process_and_blocks_queue(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    front, _, _ = publication(repo, monkeypatch)
+    worker = deployer(repo, front.outbox, monkeypatch)
+    finish = threading.Event()
+    ended = threading.Event()
+
+    def stalled(*_: object) -> int:
+        finish.wait(2)
+        ended.set()
+        return 0
+
+    monkeypatch.setattr(worker, "run_wrapper", stalled)
+    with pytest.raises(RuntimeError, match="process left active"):
+        worker.run_rollout(["checked-cpd"], repo / "log", deadline=0.01)
+    assert not ended.is_set()
+    finish.set()
+    assert ended.wait(1)
